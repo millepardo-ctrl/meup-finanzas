@@ -20,8 +20,13 @@ Code, Opus u Codex sobre este repo debe partir de ahí.
 - ✅ Fase 0 — infraestructura (Supabase project, credenciales Dropbox, repo)
 - ✅ Fase 1 — este commit: repo scaffold, docs y workflows versionados
 - ✅ Fase 2 — schema Postgres aplicado en Supabase (`migrations/0001_schema_inicial.sql`)
-- ✅ Fase 3 — WF-09 (compras Symphony), WF-04 (extractos bancarios) y WF-01
-  (comprobantes WhatsApp/Telegram) migrados a Postgres, probados en producción
-- ⏳ Fase 4 — editor Lovable para contabilidad + dashboard (siguiente)
+- ✅ Fase 3 — WF-09 (compras Symphony), WF-04 (extractos bancarios), WF-01
+  (comprobantes WhatsApp/Telegram), WF-02 (conciliación), WF-07 (solicitud
+  transporte) y WF-08 (pago transportista) migrados a Postgres. WF-09/04/01
+  probados en producción; WF-02/07/08 validados contra Supabase, pendientes
+  de importar en n8n y activar
+- ⏳ Fase 4 — editor Lovable para contabilidad + dashboard: Comprobantes,
+  Compras, Proveedores, Bancos, Catálogos, Transportes y Conciliación ya
+  conectados a datos reales; faltan gráficos avanzados y refinar RLS por rol
 - ⏳ Fase 5 — storage Drive → Dropbox
 - ⏸️ Fase 6 (diferido) — SIIGO Fase 4, WhatsApp Cloud API, agente conversacional

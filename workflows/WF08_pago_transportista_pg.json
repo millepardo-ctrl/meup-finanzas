@@ -1,0 +1,689 @@
+{
+  "name": "MeUp WF-08 (Postgres) · Comprobante de egreso → Pago transportista + BANCOS_MOV",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "n1",
+      "name": "Cada 30 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_doc as \"ID_DOC\", ocr_valor as \"OCR_VALOR\", ocr_fecha_pago as \"OCR_FECHA_PAGO\",\n       ocr_referencia as \"OCR_REFERENCIA\", ocr_cliente as \"OCR_CLIENTE\", url_drive as \"URL_DRIVE\",\n       clasificacion as \"CLASIFICACION\", estado as \"ESTADO\"\nfrom comprobantes_wa\nwhere clasificacion = 'COMPROBANTE_EGRESO' and estado in ('PROCESADO','SIN_MATCH','REVISAR');",
+        "options": {}
+      },
+      "id": "n2",
+      "name": "Leer comprobantes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        -150
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_pago as \"ID_PAGO\", id_solicitud as \"ID_SOLICITUD\", id_compra as \"ID_COMPRA\",\n       transportista as \"TRANSPORTISTA\", cedula as \"CEDULA\", tipo as \"TIPO\", valor as \"VALOR\",\n       medio_pago as \"MEDIO_PAGO\", estado as \"ESTADO\", id_doc_wa as \"ID_DOC_WA\",\n       fecha_pago as \"FECHA_PAGO\", cuenta_origen as \"CUENTA_ORIGEN\", pago_neto as \"PAGO_NETO\"\nfrom transportes_pagos;",
+        "options": {}
+      },
+      "id": "n3",
+      "name": "Leer TRANSPORTES_PAGOS",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_solicitud as \"ID_SOLICITUD\", telefono as \"TELEFONO\", cuenta_cobro as \"CUENTA_COBRO\",\n       remision as \"REMISION\"\nfrom transportes_solicitudes;",
+        "options": {}
+      },
+      "id": "n3b",
+      "name": "Leer TRANSPORTES_SOLICITUDES",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        150
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_mov as \"ID_MOV\", fecha as \"FECHA\", valor as \"VALOR\", tipo as \"TIPO\",\n       id_conciliacion as \"ID_CONCILIACION\"\nfrom bancos_mov;",
+        "options": {}
+      },
+      "id": "n4",
+      "name": "Leer BANCOS_MOV",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        300
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const docs = (function(){ try { return $('Leer comprobantes').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })()\n  .filter(d => d.CLASIFICACION === 'COMPROBANTE_EGRESO' && ['PROCESADO','SIN_MATCH','REVISAR'].includes(d.ESTADO));\nconst pagos = (function(){ try { return $('Leer TRANSPORTES_PAGOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst sols = (function(){ try { return $('Leer TRANSPORTES_SOLICITUDES').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst movs = (function(){ try { return $('Leer BANCOS_MOV').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst parseF = v => { if (!v) return null; if (v instanceof Date) return v;\n  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899,11,30) + Math.round(v)*86400000);\n  const s = String(v).trim();\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000); }\n  let m = s.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})/);\n  if (m) return new Date(m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0'));\n  const d2 = new Date(s.replace(' ', 'T')); return isNaN(d2) ? null : d2; };\nconst norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^A-Z0-9 ]/g,'');\nconst out = [];\nfor (const d of docs) {\n  const val = parseFloat(d.OCR_VALOR);\n  if (!val) { out.push({ json: { accion: 'ERROR', doc: d, motivo: 'OCR sin valor' } }); continue; }\n  const pend = pagos.filter(p => p.ESTADO === 'PENDIENTE');\n  // Score: valor (obligatorio ±1) + nombre transportista + teléfono en referencia OCR\n  const neto = p2 => { const v = parseFloat(p2.PAGO_NETO); return isNaN(v) || !v ? parseFloat(p2.VALOR) : v; };\n  // El comprobante muestra el NETO pagado (bruto - retefuente 1%); cruzar contra neto o bruto\n  let candidatos = pend.filter(p => Math.abs(neto(p) - val) <= 1 || Math.abs(parseFloat(p.VALOR) - val) <= 1);\n  let esAbono = false;\n  if (candidatos.length === 0) {\n    // Abono parcial: valor menor al pendiente, desempatar por nombre/teléfono\n    candidatos = pend.filter(p => val < neto(p));\n    esAbono = true;\n  }\n  if (candidatos.length > 1) {\n    const ref = norm(d.OCR_REFERENCIA + ' ' + d.OCR_CLIENTE);\n    const byPhone = candidatos.filter(p => {\n      const sol = sols.find(s => s.ID_SOLICITUD === p.ID_SOLICITUD) || {};\n      return sol.TELEFONO && ref.includes(String(sol.TELEFONO));\n    });\n    if (byPhone.length >= 1) candidatos = byPhone;\n    else {\n      const byName = candidatos.filter(p => norm(p.TRANSPORTISTA).split(' ').filter(w => w.length > 3).some(w => ref.includes(w)));\n      if (byName.length >= 1) candidatos = byName;\n    }\n  }\n  if (candidatos.length !== 1) {\n      if (candidatos.length === 0 && d.ESTADO === 'SIN_MATCH') continue; // reintento silencioso\n      if (candidatos.length > 1 && d.ESTADO === 'AMBIGUO') continue; // ya alertado, espera revisión humana\n      out.push({ json: { accion: candidatos.length === 0 ? 'SIN_MATCH_TRANSPORTE' : 'AMBIGUO', doc: d, motivo: candidatos.length + ' candidatos en TRANSPORTES_PAGOS' } }); continue;\n    }\n  const p = candidatos[0];\n  // Anti-duplicado nivel comprobante: ¿ya hay un pago PAGADO con este ID_DOC_WA o mismo valor+transportista+fecha?\n  const yaPagado = pagos.find(x => x.ESTADO === 'PAGADO' && (x.ID_DOC_WA === d.ID_DOC || (Math.abs(parseFloat(x.VALOR)-val)<=1 && norm(x.TRANSPORTISTA)===norm(p.TRANSPORTISTA) && x.FECHA_PAGO === d.OCR_FECHA_PAGO)));\n  if (yaPagado) {\n    out.push({ json: { accion: 'DUPLICADO', doc: d, pago: p, motivo: 'Ya existe pago ' + yaPagado.ID_PAGO + ' con mismo valor/transportista/fecha' } });\n    continue;\n  }\n  // Anti-duplicado nivel banco: ¿existe ya el egreso real en el extracto?\n  const movReal = movs.find(m => { if (m.ID_CONCILIACION) return false; const mv = parseFloat(m.VALOR); if (!(mv <= -val + 1 && mv >= -val - 1) || m.TIPO !== 'EGRESO') return false; const fd = parseF(d.OCR_FECHA_PAGO), fm2 = parseF(m.FECHA); if (fd && fm2) return Math.abs((fm2 - fd) / 86400000) <= 3; return true; });\n  const sol = sols.find(s => s.ID_SOLICITUD === p.ID_SOLICITUD) || {};\n  out.push({ json: { accion: 'MATCH', doc: d, pago: p, sol, esAbono, valorPagado: val, movRealExistente: movReal ? movReal.ID_MOV : '' } });\n}\nreturn out;"
+      },
+      "id": "n5",
+      "name": "Motor de matching transportes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "MATCH",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "MATCH"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "DUPLICADO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "DUPLICADO"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "MATCH",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "OTRO"
+            }
+          ]
+        }
+      },
+      "id": "n6",
+      "name": "¿Resultado?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        720,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update transportes_pagos set\n  tipo = $2::text,\n  valor = $3::text::numeric,\n  fecha_pago = nullif($4::text,'')::date,\n  url_comprobante = $5::text,\n  estado = 'PAGADO',\n  id_doc_wa = nullif($6::text,''),\n  notas = $7::text,\n  human_review = 'PENDIENTE',\n  updated_at = now()\nwhere id_pago = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.pago.ID_PAGO, $json.esAbono ? 'ABONO' : $json.pago.TIPO, $json.valorPagado, $json.doc.OCR_FECHA_PAGO, $json.doc.URL_DRIVE, $json.doc.ID_DOC, $json.esAbono ? 'Abono parcial; saldo queda en la solicitud' : 'Pago total'] }}"
+        }
+      },
+      "id": "n7",
+      "name": "Marcar pago PAGADO",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        980,
+        -180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Si fue ABONO, crear nueva fila PENDIENTE por el saldo y actualizar estado de la solicitud\nconst j = $('¿Resultado?').item.json;\nconst items = [];\nconst saldo = parseFloat(j.pago.VALOR) - j.valorPagado;\nif (j.esAbono && saldo > 1) {\n  items.push({ json: { crearSaldo: true, fila: {\n    ID_PAGO: 'TRP-' + Date.now().toString().slice(-9),\n    ID_SOLICITUD: j.pago.ID_SOLICITUD,\n    ID_COMPRA: j.pago.ID_COMPRA,\n    TRANSPORTISTA: j.pago.TRANSPORTISTA,\n    CEDULA: j.pago.CEDULA,\n    TIPO: 'SALDO',\n    VALOR: saldo,\n    MEDIO_PAGO: j.pago.MEDIO_PAGO,\n    ESTADO: 'PENDIENTE',\n    NOTAS: 'Saldo tras abono ' + j.pago.ID_PAGO\n  }, estadoSolicitud: 'PARCIAL', j }});\n} else {\n  items.push({ json: { crearSaldo: false, estadoSolicitud: 'PAGADO', j }});\n}\nreturn items;"
+      },
+      "id": "n8",
+      "name": "Gestionar abono / saldo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update transportes_solicitudes set estado = $2::text, updated_at = now() where id_solicitud = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.j.pago.ID_SOLICITUD, $json.estadoSolicitud] }}"
+        }
+      },
+      "id": "n9",
+      "name": "Actualizar estado solicitud",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1420,
+        -180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Registrar el egreso en BANCOS_MOV evitando duplicados:\n// si el egreso real ya está en el extracto, solo lo vinculamos; si no, creamos fila proyectada.\nconst d = $('Gestionar abono / saldo').item.json.j;\nif (d.movRealExistente) {\n  return [{ json: { modo: 'VINCULAR', ID_MOV: d.movRealExistente, idPago: d.pago.ID_PAGO } }];\n}\nreturn [{ json: { modo: 'CREAR', fila: {\n  ID_MOV: 'MOV-' + Date.now().toString().slice(-9),\n  FECHA: d.doc.OCR_FECHA_PAGO,\n  CUENTA: d.pago.CUENTA_ORIGEN || 'BC-CTE-3762',\n  DESCRIPCION: 'Pago transportista ' + d.pago.TRANSPORTISTA,\n  REFERENCIA: d.pago.ID_PAGO,\n  MONEDA: 'COP',\n  VALOR: -Math.abs(d.valorPagado), // = neto real que salió del banco según el comprobante\n  TIPO: 'EGRESO',\n  CATEGORIA: 'TRANSPORTE',\n  DETALLE: 'Cta cobro ' + (d.sol.CUENTA_COBRO || '') + ' Rem ' + (d.sol.REMISION || '') + ' via ' + d.pago.MEDIO_PAGO,\n  FACTURA_OC: d.pago.ID_COMPRA,\n  TERCERO: d.pago.TRANSPORTISTA + ' CC ' + d.pago.CEDULA,\n  ID_CONCILIACION: d.pago.ID_PAGO,\n  ESTADO_CONTABLE: 'PENDIENTE',\n  ORIGEN: 'TRANSPORTE_APP'\n}, idPago: d.pago.ID_PAGO }}];"
+      },
+      "id": "n10",
+      "name": "Preparar registro bancario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.modo }}",
+              "rightValue": "CREAR",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "n11",
+      "name": "¿Crear o vincular?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into bancos_mov (\n  id_mov, fecha, cuenta, descripcion, referencia, moneda, valor, tipo, categoria, detalle,\n  factura_oc, tercero, id_conciliacion, estado_contable, origen, human_review\n) values (\n  $1::text, $2::text::date, $3::text, $4::text, $5::text, 'COP', $6::text::numeric, 'EGRESO',\n  'TRANSPORTE', $7::text, nullif($8::text,''), $9::text, $10::text, 'PENDIENTE', 'TRANSPORTE_APP', 'PENDIENTE'\n)\non conflict (id_mov) do nothing;",
+        "options": {
+          "queryReplacement": "={{ [$json.fila.ID_MOV, $json.fila.FECHA, $json.fila.CUENTA, $json.fila.DESCRIPCION, $json.fila.REFERENCIA, $json.fila.VALOR, $json.fila.DETALLE, $json.fila.FACTURA_OC, $json.fila.TERCERO, $json.fila.ID_CONCILIACION] }}"
+        }
+      },
+      "id": "n12",
+      "name": "Crear movimiento proyectado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2080,
+        -260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update bancos_mov set categoria = 'TRANSPORTE', id_conciliacion = $2::text, updated_at = now()\nwhere id_mov = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.ID_MOV, $json.idPago] }}"
+        }
+      },
+      "id": "n13",
+      "name": "Vincular movimiento real del extracto",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2080,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa set id_mov_match = $2::text, estado = 'CONCILIADO_TRANSPORTE',\n  human_review = 'PENDIENTE', updated_at = now()\nwhere id_doc = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$('Gestionar abono / saldo').item.json.j.doc.ID_DOC, $json.ID_MOV || $json.fila?.ID_MOV] }}"
+        }
+      },
+      "id": "n14",
+      "name": "Cerrar comprobante",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2300,
+        -180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=✅ *Pago a transportista confirmado*\\n{{ $('Gestionar abono / saldo').item.json.j.pago.ID_PAGO }} · {{ $('Gestionar abono / saldo').item.json.j.pago.TRANSPORTISTA }}\\nValor: ${{ $('Gestionar abono / saldo').item.json.j.valorPagado }} ({{ $('Gestionar abono / saldo').item.json.j.esAbono ? 'ABONO' : 'TOTAL' }})\\nID compra: {{ $('Gestionar abono / saldo').item.json.j.pago.ID_COMPRA }}\\nComprobante: {{ $('Gestionar abono / saldo').item.json.j.doc.URL_DRIVE }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "parseMode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "n15",
+      "name": "Notificar pago confirmado",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2520,
+        -180
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa set estado = 'DUPLICADO', notas = $2::text, human_review = 'PENDIENTE',\n  updated_at = now()\nwhere id_doc = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.doc.ID_DOC, $json.motivo] }}"
+        }
+      },
+      "id": "n16",
+      "name": "Marcar comprobante DUPLICADO",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        980,
+        60
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=🔴 *POSIBLE PAGO DUPLICADO a transportista*\\nComprobante {{ $json.doc.ID_DOC }} · {{ $json.pago.TRANSPORTISTA }}\\nValor: ${{ $json.doc.OCR_VALOR }}\\n{{ $json.motivo }}\\nRevisar antes de cualquier otro pago: {{ $json.doc.URL_DRIVE }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "parseMode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "n17",
+      "name": "Alerta DUPLICADO",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        60
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=⚠️ Comprobante de egreso sin match en transportes\\n{{ $json.doc.ID_DOC }} · ${{ $json.doc.OCR_VALOR }}\\n{{ $json.motivo }}\\n{{ $json.doc.URL_DRIVE }}",
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "n18",
+      "name": "Alerta sin match / ambiguo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        980,
+        260
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa set estado = $2::text, notas = $3::text, updated_at = now()\nwhere id_doc = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.doc.ID_DOC, $json.accion === 'AMBIGUO' ? 'AMBIGUO' : ($json.accion === 'ERROR' ? 'ERROR' : 'SIN_MATCH'), $json.motivo || ''] }}"
+        }
+      },
+      "id": "nx1",
+      "name": "Marcar estado del problema",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        980,
+        380
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 30 minutos": {
+      "main": [
+        [
+          {
+            "node": "Leer comprobantes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer comprobantes": {
+      "main": [
+        [
+          {
+            "node": "Leer TRANSPORTES_PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer TRANSPORTES_PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Leer TRANSPORTES_SOLICITUDES",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer TRANSPORTES_SOLICITUDES": {
+      "main": [
+        [
+          {
+            "node": "Leer BANCOS_MOV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer BANCOS_MOV": {
+      "main": [
+        [
+          {
+            "node": "Motor de matching transportes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Motor de matching transportes": {
+      "main": [
+        [
+          {
+            "node": "¿Resultado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Resultado?": {
+      "main": [
+        [
+          {
+            "node": "Marcar pago PAGADO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar comprobante DUPLICADO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar estado del problema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar pago PAGADO": {
+      "main": [
+        [
+          {
+            "node": "Gestionar abono / saldo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gestionar abono / saldo": {
+      "main": [
+        [
+          {
+            "node": "Actualizar estado solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar estado solicitud": {
+      "main": [
+        [
+          {
+            "node": "Preparar registro bancario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar registro bancario": {
+      "main": [
+        [
+          {
+            "node": "¿Crear o vincular?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Crear o vincular?": {
+      "main": [
+        [
+          {
+            "node": "Crear movimiento proyectado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Vincular movimiento real del extracto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear movimiento proyectado": {
+      "main": [
+        [
+          {
+            "node": "Cerrar comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vincular movimiento real del extracto": {
+      "main": [
+        [
+          {
+            "node": "Cerrar comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cerrar comprobante": {
+      "main": [
+        [
+          {
+            "node": "Notificar pago confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar comprobante DUPLICADO": {
+      "main": [
+        [
+          {
+            "node": "Alerta DUPLICADO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar estado del problema": {
+      "main": [
+        [
+          {
+            "node": "Alerta sin match / ambiguo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

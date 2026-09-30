@@ -120,11 +120,33 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
 0. Infra (repo, Supabase, credenciales Dropbox) — hecho.
 1. Repo scaffold + docs + workflows versionados — en curso (este commit).
 2. Schema Postgres en Supabase — hecho (`migrations/0001_schema_inicial.sql`).
-3. Migrar workflows de nodos Sheets → Postgres, empezando por `COMPRAS_DETALLE`
-   (WF-09), `BANCOS_MOV` (WF-04), `COMPROBANTES_WA` (WF-01) — hecho, probados en
-   producción (30 sep 2026). Pendiente desactivar las versiones Sheets equivalentes
-   en n8n para que no corran en paralelo.
-4. Editor de datos para contabilidad en Lovable (grilla tipo Excel sobre Supabase) + dashboard — siguiente paso.
+3. Migrar workflows de nodos Sheets → Postgres:
+   - `COMPRAS_DETALLE` (WF-09), `BANCOS_MOV` (WF-04), `COMPROBANTES_WA` (WF-01)
+     — hecho, probados en producción (30 sep 2026).
+   - `CONCILIACION` (WF-02), `TRANSPORTES_SOLICITUDES`/`TRANSPORTES_PAGOS` (WF-07,
+     WF-08) — hecho (`workflows/WF02_conciliacion_pg.json`,
+     `WF07_v2_solicitud_transporte_pg.json`, `WF08_pago_transportista_pg.json`),
+     validados con queries de prueba contra Supabase (30 sep 2026). Pendiente
+     importarlos en n8n y activarlos.
+   - Pendiente en todos los casos: desactivar la versión Sheets equivalente en
+     n8n una vez la Postgres quede corriendo en producción, para que no corran
+     en paralelo.
+   - Bugs de esquema encontrados y corregidos en el camino: `ocr_confianza`
+     (era `numeric`, es texto categórico ALTA/MEDIA/BAJA — migración 0003),
+     `retefuente_aplica` (era `boolean`, es tri-estado POR_CONFIRMAR/SI/NO —
+     migración 0004), y `transportes_solicitudes.valor_solicitado` relajado a
+     nullable (fila de "revisar a mano" cuando el parser no extrae nada).
+   - Patrón nuevo confirmado en WF-07/08/02: varias tablas tienen FK estrictas
+     (`id_compra`, `id_mov_banco`, `id_doc_wa`, `cuenta`→`cat_bancos`). El código
+     de cada workflow debe dejar esos campos en null cuando la referencia no
+     existe todavía, en vez de bloquear el insert — coherente con el patrón
+     anti-bug #7 (nunca bloquear por un dato no resuelto).
+4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
+   vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
+   Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
+   Proveedores, Bancos, Catálogos, Transportes, Conciliación, y la mayoría de
+   KPIs del dashboard. Pendiente: gráficos adicionales del dashboard y RLS por
+   rol (hoy es "authenticated = acceso total").
 5. Storage Drive → Dropbox.
 6. Diferido: SIIGO Fase 4, WhatsApp Cloud API, agente conversacional Telegram.
 

@@ -1,0 +1,332 @@
+{
+  "name": "MeUp WF-07 v2 (Postgres) · Solicitudes de pago a transportistas (multi-despacho)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "n1",
+      "name": "Recibir de WF-01 (Execute Workflow Trigger)",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1200, messages: [{ role: 'user', content: 'Eres el parser de solicitudes de pago a transportistas de MeUp (Colombia). El mensaje puede contener UNA o VARIAS solicitudes (varios despachos/transportistas). Responde SOLO con JSON válido, sin markdown:\\n{\\n \"solicitudes\": [\\n  {\\n   \"id_compra\": numero o null (el ID de Symphony, ej. 15889; si dicen \\\"ID 15889\\\" extrae 15889),\\n   \"cuenta_cobro\": \"string o null\",\\n   \"remision\": \"string o null\",\\n   \"valor\": numero o null,\\n   \"transportista\": \"string o null\",\\n   \"cedula\": \"string o null\",\\n   \"telefono\": \"string o null (celular, 10 dígitos, empieza por 3)\",\\n   \"medio_pago\": \"NEQUI|DAVIPLATA|BANCOLOMBIA|OTRO|null\",\\n   \"tipo\": \"ABONO|TOTAL (TOTAL si no se especifica; ABONO si dicen abono/parcial/adelanto/ANTICIPO)\"\\n  }\\n ],\\n \"confianza\": \"ALTA|MEDIA|BAJA\"\\n}\\nReglas: punto = separador de miles (700.000 = 700000). No confundas teléfono con cédula. La REMISIÓN suele ser el mismo número del ID de compra de Symphony: si no mencionan ID explícito, usa la remisión como id_compra. Si hay varios transportistas o varias remisiones con valores distintos, crea un elemento por cada uno. Si falta un dato en un elemento, null.\\n\\nMENSAJE:\\n' + $json.texto }] }) }}",
+        "options": {}
+      },
+      "id": "n2",
+      "name": "Extraer solicitudes con Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_CRED_ANTHROPIC",
+          "name": "Anthropic x-api-key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_solicitud, cuenta_cobro, remision, id_compra, valor_solicitado, transportista from transportes_solicitudes where fecha_solicitud >= now() - interval '180 days';",
+        "options": {}
+      },
+      "id": "n3",
+      "name": "Leer solicitudes existentes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        -150
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_compra, valor_domicilio_cobrado from compras_symphony;",
+        "options": {}
+      },
+      "id": "n3b",
+      "name": "Leer COMPRAS_SYMPHONY",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        150
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let p = { solicitudes: [], confianza: 'BAJA' };\ntry {\n  const raw = $('Extraer solicitudes con Claude').first().json.content.filter(b => b.type === 'text').map(b => b.text).join('');\n  p = JSON.parse(raw.replace(/```json|```/g, '').trim());\n} catch (e) {}\nif (!Array.isArray(p.solicitudes)) p.solicitudes = [];\nconst meta = $('Recibir de WF-01 (Execute Workflow Trigger)').first().json;\nconst existentes = (function(){ try { return $('Leer solicitudes existentes').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst compras = (function(){ try { return $('Leer COMPRAS_SYMPHONY').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst out = [];\nlet seq = Date.now();\nfor (const s of p.solicitudes) {\n  let idCompra = s.id_compra ? parseInt(String(s.id_compra).replace(/\\D/g, '')) : '';\n  // La remisión ES el ID de la compra en Symphony: úsala si no vino ID explícito\n  if (!idCompra && s.remision) { const r = String(s.remision).replace(/\\D/g, ''); if (r.length >= 4 && r.length <= 6) idCompra = parseInt(r); }\n  const compra = compras.find(c => parseInt(c.id_compra) === idCompra);\n  // Validación cruzada contra Symphony: existe la compra y el valor no excede lo cobrado+20%\n  let avisos = [];\n  if (idCompra && !compra) avisos.push('ID_COMPRA ' + idCompra + ' no existe en COMPRAS_SYMPHONY');\n  if (compra && s.valor && parseFloat(compra.valor_domicilio_cobrado) > 0 && s.valor > parseFloat(compra.valor_domicilio_cobrado) * 1.2) {\n    avisos.push('Valor solicitado supera en >20% lo cobrado al cliente (' + compra.valor_domicilio_cobrado + ')');\n  }\n  // Duplicado\n  const dup = existentes.find(e =>\n    (s.cuenta_cobro && s.remision && String(e.cuenta_cobro) === String(s.cuenta_cobro) && String(e.remision) === String(s.remision)) ||\n    (idCompra && parseInt(e.id_compra) === idCompra && parseFloat(e.valor_solicitado) === parseFloat(s.valor) && norm(e.transportista) === norm(s.transportista))\n  );\n  function norm(x) { return String(x || '').toUpperCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, ''); }\n  const estado = dup ? 'DUPLICADO' : ((p.confianza === 'BAJA' || !s.valor) ? 'REVISAR' : 'PENDIENTE');\n  out.push({ json: {\n    ID_SOLICITUD: 'TRS-' + (seq++).toString().slice(-9),\n    FECHA_SOLICITUD: meta.wa_timestamp.replace('T', ' ').slice(0, 16),\n    SOLICITADO_POR_WA: '+' + meta.wa_from,\n    ID_COMPRA: compra ? idCompra : '',  // nunca insertar un ID_COMPRA que no exista en compras_symphony (FK)\n    CUENTA_COBRO: s.cuenta_cobro || '',\n    REMISION: s.remision || '',\n    TRANSPORTISTA: norm(s.transportista),\n    CEDULA: s.cedula || '',\n    TELEFONO: s.telefono || s.cuenta_bancaria || '',  // destino del pago: celular o cuenta bancaria\n    MEDIO_PAGO: s.medio_pago || 'OTRO',\n    VALOR_SOLICITADO: s.valor || '',\n    ESTADO: estado,\n    RETEFUENTE_APLICA: 'POR_CONFIRMAR',\n    HUMAN_REVIEW: 'PENDIENTE',\n    TIPO: s.tipo || 'TOTAL',\n    // Retefuente transporte 1% si bruto >= 4 UVT ($209.496 en 2026 — actualizar cada año junto con CONFIG!B3)\n    RETENCION: s.valor && s.valor >= 209496 ? Math.round(s.valor * 0.01) : 0,\n    PAGO_NETO: s.valor ? (s.valor >= 209496 ? s.valor - Math.round(s.valor * 0.01) : s.valor) : '',\n    DUPLICADO_DE: dup ? dup.id_solicitud : '',\n    NOTAS: (avisos.length ? '⚠️ ' + avisos.join(' | ') + ' | ' : '') + (dup ? 'DUPLICADO de ' + dup.id_solicitud + ' | ' : '') + 'Texto: ' + (meta.texto || '').slice(0, 250)\n  }});\n}\nif (out.length === 0) {\n  out.push({ json: { ID_SOLICITUD: 'TRS-' + Date.now().toString().slice(-9), FECHA_SOLICITUD: meta.wa_timestamp.replace('T',' ').slice(0,16), SOLICITADO_POR_WA: '+' + meta.wa_from, ESTADO: 'REVISAR', HUMAN_REVIEW: 'PENDIENTE', NOTAS: 'Parser no extrajo solicitudes. Texto: ' + (meta.texto || '').slice(0, 250) } });\n}\nreturn out;"
+      },
+      "id": "n4",
+      "name": "Estructurar + validar vs Symphony + dedup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into transportes_solicitudes (\n  id_solicitud, fecha_solicitud, solicitado_por_wa, id_compra, cuenta_cobro, remision,\n  transportista, cedula, telefono, medio_pago, valor_solicitado, estado,\n  retefuente_aplica, human_review, notas\n) values (\n  $1::text, $2::text::timestamptz, $3::text, nullif($4::text,''), $5::text, $6::text,\n  $7::text, $8::text, $9::text, $10::text, nullif($11::text,'')::numeric, $12::text,\n  $13::text, $14::text, $15::text\n)\non conflict (id_solicitud) do nothing;",
+        "options": {
+          "queryReplacement": "={{ [$json.ID_SOLICITUD, $json.FECHA_SOLICITUD, $json.SOLICITADO_POR_WA, $json.ID_COMPRA, $json.CUENTA_COBRO, $json.REMISION, $json.TRANSPORTISTA, $json.CEDULA, $json.TELEFONO, $json.MEDIO_PAGO, $json.VALOR_SOLICITADO, $json.ESTADO, $json.RETEFUENTE_APLICA, $json.HUMAN_REVIEW, $json.NOTAS] }}"
+        }
+      },
+      "id": "n5",
+      "name": "Registrar solicitud",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        920,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ESTADO }}",
+              "rightValue": "PENDIENTE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "n6",
+      "name": "¿Solicitud válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into transportes_pagos (\n  id_pago, id_solicitud, id_compra, transportista, cedula, tipo, valor, medio_pago,\n  estado, human_review, notas, retencion, pago_neto\n) values (\n  $1::text, $2::text, nullif($3::text,''), $4::text, $5::text, $6::text, nullif($7::text,'')::numeric,\n  $8::text, $9::text, $10::text, $11::text, nullif($12::text,'')::numeric, nullif($13::text,'')::numeric\n)\non conflict (id_pago) do nothing;",
+        "options": {
+          "queryReplacement": "={{ ['TRP-' + Date.now().toString().slice(-9) + $itemIndex, $json.ID_SOLICITUD, $json.ID_COMPRA, $json.TRANSPORTISTA, $json.CEDULA, $json.TIPO, $json.VALOR_SOLICITADO, $json.MEDIO_PAGO, 'PENDIENTE', 'PENDIENTE', 'Creado por WF-07', $json.RETENCION, $json.PAGO_NETO] }}"
+        }
+      },
+      "id": "n7",
+      "name": "Crear pago PENDIENTE",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1380,
+        -110
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=🚛 *Solicitud de pago a transportista*\\n{{ $json.ID_SOLICITUD }} · Compra {{ $json.ID_COMPRA }}\\n{{ $json.TRANSPORTISTA }} (CC {{ $json.CEDULA }})\\nValor bruto: ${{ $json.VALOR_SOLICITADO }} ({{ $json.TIPO }})\\n💰 *PAGAR NETO: ${{ $json.PAGO_NETO }}* (retefuente ${{ $json.RETENCION }})\\nMedio: {{ $json.MEDIO_PAGO }} → {{ $json.TELEFONO }}\\nCta cobro {{ $json.CUENTA_COBRO }} · Rem {{ $json.REMISION }}\\n{{ $json.NOTAS.startsWith('⚠️') ? $json.NOTAS.split(' | Texto:')[0] : '' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "parseMode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "n8",
+      "name": "Alerta a tesorería",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1620,
+        -110
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=⚠️ Solicitud {{ $json.ESTADO }}\\n{{ $json.ID_SOLICITUD }} · {{ $json.TRANSPORTISTA }}\\n{{ $json.NOTAS }}",
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "n9",
+      "name": "Alerta duplicado / revisar",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1380,
+        130
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Recibir de WF-01 (Execute Workflow Trigger)": {
+      "main": [
+        [
+          {
+            "node": "Extraer solicitudes con Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer solicitudes con Claude": {
+      "main": [
+        [
+          {
+            "node": "Leer solicitudes existentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer solicitudes existentes": {
+      "main": [
+        [
+          {
+            "node": "Leer COMPRAS_SYMPHONY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer COMPRAS_SYMPHONY": {
+      "main": [
+        [
+          {
+            "node": "Estructurar + validar vs Symphony + dedup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estructurar + validar vs Symphony + dedup": {
+      "main": [
+        [
+          {
+            "node": "Registrar solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar solicitud": {
+      "main": [
+        [
+          {
+            "node": "¿Solicitud válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Solicitud válida?": {
+      "main": [
+        [
+          {
+            "node": "Crear pago PENDIENTE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alerta duplicado / revisar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear pago PENDIENTE": {
+      "main": [
+        [
+          {
+            "node": "Alerta a tesorería",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

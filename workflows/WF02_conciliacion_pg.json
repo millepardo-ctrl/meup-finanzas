@@ -1,0 +1,346 @@
+{
+  "name": "MeUp WF-02 (Postgres) · Conciliación comprobantes ↔ movimientos bancarios",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "n1",
+      "name": "Cada 30 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_doc as \"ID_DOC\", clasificacion as \"CLASIFICACION\", estado as \"ESTADO\",\n       ocr_valor as \"OCR_VALOR\", ocr_fecha_pago as \"OCR_FECHA_PAGO\", ocr_cliente as \"OCR_CLIENTE\",\n       id_compra_informado as \"ID_COMPRA_INFORMADO\", url_drive as \"URL_DRIVE\"\nfrom comprobantes_wa\nwhere clasificacion is distinct from 'COMPROBANTE_EGRESO'\n  and estado in ('PROCESADO','SIN_MATCH');",
+        "options": {}
+      },
+      "id": "n2",
+      "name": "Leer comprobantes sin conciliar",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_mov as \"ID_MOV\", fecha as \"FECHA\", valor as \"VALOR\", tipo as \"TIPO\",\n       id_conciliacion as \"ID_CONCILIACION\", tercero as \"TERCERO\", referencia as \"REFERENCIA\",\n       descripcion as \"DESCRIPCION\", factura_oc as \"FACTURA_OC\"\nfrom bancos_mov;",
+        "options": {}
+      },
+      "id": "n3",
+      "name": "Leer movimientos bancarios",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        200
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const docs = (function(){ try { return $('Leer comprobantes sin conciliar').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })().filter(d => d.CLASIFICACION !== 'COMPROBANTE_EGRESO')\n  .filter(d => ['PROCESADO','SIN_MATCH'].includes(d.ESTADO)); // SIN_MATCH se reintenta: el extracto llega al día siguiente\n// Los comprobantes de egreso (pagos a transportistas) los procesa WF-08, no este flujo.\nconst movs = (function(){ try { return $('Leer movimientos bancarios').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst out = [];\nconst parseF = v => { if (!v) return null; if (v instanceof Date) return v;\n  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899,11,30) + Math.round(v)*86400000);\n  const s = String(v).trim();\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000); }\n  let m = s.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})/);\n  if (m) return new Date(m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0'));\n  const d2 = new Date(s.replace(' ', 'T')); return isNaN(d2) ? null : d2; };\nconst norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[^A-Z0-9 ]/g, '');\nfor (const d of docs) {\n  const val = parseFloat(d.OCR_VALOR);\n  if (!val) { out.push({ json: { ...d, match: 'ERROR', motivo: 'OCR sin valor' } }); continue; }\n  const fechaDoc = parseF(d.OCR_FECHA_PAGO);\n  // 1) Match exacto: valor igual, ingreso, fecha ±3 días, sin conciliación previa\n  let candidatos = movs.filter(m => {\n    if (m.ID_CONCILIACION) return false;\n    if (m.TIPO !== 'INGRESO') return false;\n    if (Math.abs(parseFloat(m.VALOR) - val) > 1) return false;\n    const fm = parseF(m.FECHA);\n    if (fechaDoc && fm) { const diff = Math.abs((fm - fechaDoc) / 86400000); if (diff > 3) return false; }\n    // fecha ilegible (cargas viejas con serial) → no descartar: deciden valor y desempates\n    return true;\n  });\n  // 2) Desempate por nombre de cliente\n  if (candidatos.length > 1 && d.OCR_CLIENTE) {\n    const nc = norm(d.OCR_CLIENTE).split(' ').filter(w => w.length > 3);\n    const filtered = candidatos.filter(m => nc.some(w => norm(m.TERCERO).includes(w)));\n    if (filtered.length >= 1) candidatos = filtered;\n  }\n  // Desempate adicional: la ID de compra informada por el asesor aparece en la referencia/descripción del movimiento\n  if (candidatos.length > 1 && d.ID_COMPRA_INFORMADO) {\n    const idc = String(d.ID_COMPRA_INFORMADO);\n    const byId = candidatos.filter(m => (String(m.REFERENCIA||'') + ' ' + String(m.DESCRIPCION||'') + ' ' + String(m.FACTURA_OC||'')).includes(idc));\n    if (byId.length >= 1) candidatos = byId;\n  }\n  if (candidatos.length === 1) {\n    out.push({ json: { ...d, match: 'OK', metodo: 'AUTO_VALOR_FECHA', mov: candidatos[0] } });\n  } else if (candidatos.length === 0) {\n    if (d.ESTADO === 'SIN_MATCH') continue; // ya estaba marcado: reintento silencioso, sin re-alertar\n    out.push({ json: { ...d, match: 'SIN_MATCH', motivo: 'Ningún movimiento coincide (puede que el extracto aún no esté cargado)' } });\n  } else {\n    out.push({ json: { ...d, match: 'AMBIGUO', motivo: candidatos.length + ' movimientos candidatos', candidatos: candidatos.map(c => c.ID_MOV).join(', ') } });\n  }\n}\nreturn out;"
+      },
+      "id": "n4",
+      "name": "Motor de matching",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.match }}",
+                    "rightValue": "OK",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "OK"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.match }}",
+                    "rightValue": "OK",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "PROBLEMA"
+            }
+          ]
+        }
+      },
+      "id": "n5",
+      "name": "¿Match encontrado?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into conciliacion (\n  id_conc, fecha, id_doc_wa, id_mov_banco, valor_comprobante, valor_banco, diferencia,\n  metodo_match, estado\n) values (\n  $1::text, $2::text::date, $3::text, $4::text, $5::text::numeric, $6::text::numeric, 0,\n  $7::text, 'OK'\n)\non conflict (id_conc) do nothing;",
+        "options": {
+          "queryReplacement": "={{ ['CNC-' + Date.now().toString().slice(-9), new Date().toISOString().slice(0,10), $json.ID_DOC, $json.mov.ID_MOV, $json.OCR_VALOR, $json.mov.VALOR, $json.metodo] }}"
+        }
+      },
+      "id": "n6",
+      "name": "Registrar conciliación",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        920,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa set id_mov_match = $2::text, estado = 'CONCILIADO', updated_at = now()\nwhere id_doc = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.ID_DOC, $json.mov.ID_MOV] }}"
+        }
+      },
+      "id": "n7",
+      "name": "Actualizar comprobante → CONCILIADO",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1140,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa set estado = $2::text, notas = $3::text, updated_at = now()\nwhere id_doc = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.ID_DOC, $json.match, $json.motivo || $json.candidatos || ''] }}"
+        }
+      },
+      "id": "n8",
+      "name": "Marcar SIN_MATCH / AMBIGUO / ERROR",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        920,
+        220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5363971034",
+        "text": "=⚠️ Comprobante sin conciliar\\nID: {{ $json.ID_DOC }}\\nCliente OCR: {{ $json.OCR_CLIENTE }}\\nValor: ${{ $json.OCR_VALOR }}\\nMotivo: {{ $json.motivo || $json.candidatos }}\\nDrive: {{ $json.URL_DRIVE }}",
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "n9",
+      "name": "Alerta Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1140,
+        220
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update bancos_mov set categoria = 'VENTA', factura_oc = $2::text, tercero = $3::text,\n  detalle = $4::text, id_conciliacion = $5::text, updated_at = now()\nwhere id_mov = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [$('Motor de matching').item.json.mov.ID_MOV, $('Motor de matching').item.json.ID_COMPRA_INFORMADO || $('Motor de matching').item.json.mov.FACTURA_OC || '', $('Motor de matching').item.json.OCR_CLIENTE || $('Motor de matching').item.json.mov.TERCERO || '', ($('Motor de matching').item.json.ID_COMPRA_INFORMADO ? 'ID ' + $('Motor de matching').item.json.ID_COMPRA_INFORMADO + ' ' : '') + ($('Motor de matching').item.json.OCR_CLIENTE || ''), $('Motor de matching').item.json.ID_DOC] }}"
+        }
+      },
+      "id": "nb1",
+      "name": "Enriquecer movimiento bancario",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1360,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 30 minutos": {
+      "main": [
+        [
+          {
+            "node": "Leer comprobantes sin conciliar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer comprobantes sin conciliar": {
+      "main": [
+        [
+          {
+            "node": "Leer movimientos bancarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer movimientos bancarios": {
+      "main": [
+        [
+          {
+            "node": "Motor de matching",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Motor de matching": {
+      "main": [
+        [
+          {
+            "node": "¿Match encontrado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Match encontrado?": {
+      "main": [
+        [
+          {
+            "node": "Registrar conciliación",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar SIN_MATCH / AMBIGUO / ERROR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar conciliación": {
+      "main": [
+        [
+          {
+            "node": "Actualizar comprobante → CONCILIADO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar SIN_MATCH / AMBIGUO / ERROR": {
+      "main": [
+        [
+          {
+            "node": "Alerta Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar comprobante → CONCILIADO": {
+      "main": [
+        [
+          {
+            "node": "Enriquecer movimiento bancario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
