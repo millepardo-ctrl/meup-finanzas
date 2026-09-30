@@ -229,7 +229,7 @@
         "operation": "executeQuery",
         "query": "insert into proveedores_locales_pagos (id_control, id_compra, nit_proveedor, valor_costo, estado_pago, human_review, notas)\nvalues ('PLP-' || $1 || '-' || $2, $1, $2, $3, 'PENDIENTE', 'PENDIENTE', 'Generado por WF-09')\non conflict (id_compra, nit_proveedor) do update set\n  valor_costo = excluded.valor_costo,\n  updated_at = now();",
         "options": {
-          "queryReplacement": "={{ [$json.id_compra, $json.nit_proveedor, $json.valor_costo] }}"
+          "queryReplacement": "={{ [$('Separar destinos').item.json.id_compra, $('Separar destinos').item.json.nit_proveedor, $('Separar destinos').item.json.valor_costo] }}"
         }
       },
       "id": "n9",
