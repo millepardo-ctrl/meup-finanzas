@@ -1,0 +1,101 @@
+{
+  "name": "MeUp WF-03 · Conciliado → Recibo de Caja en SIIGO",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"field": "hours", "hoursInterval": 1}]}},
+      "id": "n1", "name": "Cada hora",
+      "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "documentId": {"__rl": true, "mode": "id", "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"},
+        "sheetName": {"__rl": true, "mode": "name", "value": "COMPROBANTES_WA"},
+        "filtersUI": {"values": [{"lookupColumn": "ESTADO", "lookupValue": "CONCILIADO"}]},
+        "options": {}
+      },
+      "id": "n2", "name": "Leer conciliados sin recibo SIIGO",
+      "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [220, 0],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "REEMPLAZAR_CRED_GSHEETS", "name": "Google Sheets MeUp"}}
+    },
+    {
+      "parameters": {
+        "conditions": {"options": {}, "conditions": [
+          {"leftValue": "={{ $json.RECIBO_SIIGO }}", "rightValue": "", "operator": {"type": "string", "operation": "empty"}}
+        ]}
+      },
+      "id": "n3", "name": "¿Aún sin recibo?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.siigo.com/auth",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}, {"name": "Partner-Id", "value": "MeUpN8N"}]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"username\": \"REEMPLAZAR_USUARIO_SIIGO\", \"access_key\": \"REEMPLAZAR_ACCESS_KEY_SIIGO\"}",
+        "options": {}
+      },
+      "id": "n4", "name": "Autenticar SIIGO",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [660, -80]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Construir payload de Recibo de Caja (voucher) SIIGO Nube\n// Docs: https://siigoapi.docs.apiary.io — POST /v1/vouchers\nconst d = $('¿Aún sin recibo?').item.json;\nconst token = $('Autenticar SIIGO').item.json.access_token;\nreturn [{ json: {\n  token,\n  payload: {\n    document: { id: 0 },\n    // ⚠️ id del tipo de documento RC: consultarlo una vez con GET /v1/document-types?type=RC y fijarlo aquí\n    date: d.OCR_FECHA_PAGO || new Date().toISOString().slice(0,10),\n    type: 'AdvancePayment',\n    customer: {\n      identification: d.NIT_CLIENTE || 'REEMPLAZAR_NIT_GENERICO',\n      branch_office: 0\n    },\n    currency: { code: 'COP' },\n    payment: {\n      id: 0, // ⚠️ id del medio de pago (GET /v1/payment-types?document_type=RC)\n      value: parseFloat(d.OCR_VALOR)\n    },\n    items: [{\n      due: { prefix: '', consecutive: 0 },\n      value: parseFloat(d.OCR_VALOR)\n    }],\n    observations: 'Comprobante WhatsApp ' + d.ID_DOC + ' | Ref: ' + (d.OCR_REFERENCIA || 's/r') + ' | ' + d.URL_DRIVE\n  }\n}}];"
+      },
+      "id": "n5", "name": "Construir voucher RC",
+      "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [880, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.siigo.com/v1/vouchers",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [
+          {"name": "Content-Type", "value": "application/json"},
+          {"name": "Partner-Id", "value": "MeUpN8N"},
+          {"name": "Authorization", "value": "=Bearer {{ $json.token }}"}
+        ]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "n6", "name": "Crear Recibo de Caja SIIGO",
+      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1100, -80]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {"__rl": true, "mode": "id", "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"},
+        "sheetName": {"__rl": true, "mode": "name", "value": "COMPROBANTES_WA"},
+        "columns": {"mappingMode": "defineBelow", "matchingColumns": ["ID_DOC"], "value": {
+          "ID_DOC": "={{ $('¿Aún sin recibo?').item.json.ID_DOC }}",
+          "RECIBO_SIIGO": "={{ $json.name || $json.id }}",
+          "ESTADO": "CONTABILIZADO"
+        }},
+        "options": {}
+      },
+      "id": "n7", "name": "Guardar número de recibo",
+      "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [1320, -80],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "REEMPLAZAR_CRED_GSHEETS", "name": "Google Sheets MeUp"}}
+    },
+    {
+      "parameters": {
+        "content": "## WF-03 SIIGO\nModo A (activo): API SIIGO Nube — crea el Recibo de Caja automáticamente.\nModo B (manual): si prefieres validar antes de contabilizar, desactiva los nodos SIIGO y usa el archivo semanal que genera WF-05 con la plantilla de importación de SIIGO.\n\n⚠️ Antes de activar:\n1. Solicitar credenciales API en SIIGO (usuario API + access_key).\n2. GET /v1/document-types?type=RC → anotar el id del RC y ponerlo en 'document.id'.\n3. GET /v1/payment-types?document_type=RC → id del medio de pago (transferencia).\n4. El NIT del cliente debe existir en SIIGO; si el OCR no trae NIT, el flujo usa el tercero genérico definido.",
+        "height": 340, "width": 420
+      },
+      "id": "note1", "name": "Nota", "type": "n8n-nodes-base.stickyNote", "typeVersion": 1, "position": [0, -420]
+    }
+  ],
+  "connections": {
+    "Cada hora": {"main": [[{"node": "Leer conciliados sin recibo SIIGO", "type": "main", "index": 0}]]},
+    "Leer conciliados sin recibo SIIGO": {"main": [[{"node": "¿Aún sin recibo?", "type": "main", "index": 0}]]},
+    "¿Aún sin recibo?": {"main": [[{"node": "Autenticar SIIGO", "type": "main", "index": 0}]]},
+    "Autenticar SIIGO": {"main": [[{"node": "Construir voucher RC", "type": "main", "index": 0}]]},
+    "Construir voucher RC": {"main": [[{"node": "Crear Recibo de Caja SIIGO", "type": "main", "index": 0}]]},
+    "Crear Recibo de Caja SIIGO": {"main": [[{"node": "Guardar número de recibo", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"}
+}

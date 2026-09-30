@@ -1,0 +1,857 @@
+{
+  "name": "MeUp WF-08 · Comprobante de egreso → Pago transportista + BANCOS_MOV",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "n1",
+      "name": "Cada 30 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPROBANTES_WA"
+        },
+        "options": {}
+      },
+      "id": "n2",
+      "name": "Leer comprobantes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        -150
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "TRANSPORTES_PAGOS"
+        },
+        "options": {}
+      },
+      "id": "n3",
+      "name": "Leer TRANSPORTES_PAGOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "TRANSPORTES_SOLICITUDES"
+        },
+        "options": {}
+      },
+      "id": "n3b",
+      "name": "Leer TRANSPORTES_SOLICITUDES",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        150
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "BANCOS_MOV"
+        },
+        "options": {}
+      },
+      "id": "n4",
+      "name": "Leer BANCOS_MOV",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const docs = (function(){ try { return $('Leer comprobantes').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })()\n  .filter(d => d.CLASIFICACION === 'COMPROBANTE_EGRESO' && ['PROCESADO','SIN_MATCH','REVISAR'].includes(d.ESTADO));\nconst pagos = (function(){ try { return $('Leer TRANSPORTES_PAGOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst sols = (function(){ try { return $('Leer TRANSPORTES_SOLICITUDES').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst movs = (function(){ try { return $('Leer BANCOS_MOV').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst parseF = v => { if (!v) return null; if (v instanceof Date) return v;\n  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899,11,30) + Math.round(v)*86400000);\n  const s = String(v).trim();\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000); }\n  let m = s.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})/);\n  if (m) return new Date(m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0'));\n  const d2 = new Date(s.replace(' ', 'T')); return isNaN(d2) ? null : d2; };\nconst norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^A-Z0-9 ]/g,'');\nconst out = [];\nfor (const d of docs) {\n  const val = parseFloat(d.OCR_VALOR);\n  if (!val) { out.push({ json: { accion: 'ERROR', doc: d, motivo: 'OCR sin valor' } }); continue; }\n  const pend = pagos.filter(p => p.ESTADO === 'PENDIENTE');\n  // Score: valor (obligatorio ±1) + nombre transportista + teléfono en referencia OCR\n  const neto = p2 => { const v = parseFloat(p2.PAGO_NETO); return isNaN(v) || !v ? parseFloat(p2.VALOR) : v; };\n  // El comprobante muestra el NETO pagado (bruto - retefuente 1%); cruzar contra neto o bruto\n  let candidatos = pend.filter(p => Math.abs(neto(p) - val) <= 1 || Math.abs(parseFloat(p.VALOR) - val) <= 1);\n  let esAbono = false;\n  if (candidatos.length === 0) {\n    // Abono parcial: valor menor al pendiente, desempatar por nombre/teléfono\n    candidatos = pend.filter(p => val < neto(p));\n    esAbono = true;\n  }\n  if (candidatos.length > 1) {\n    const ref = norm(d.OCR_REFERENCIA + ' ' + d.OCR_CLIENTE);\n    const byPhone = candidatos.filter(p => {\n      const sol = sols.find(s => s.ID_SOLICITUD === p.ID_SOLICITUD) || {};\n      return sol.TELEFONO && ref.includes(String(sol.TELEFONO));\n    });\n    if (byPhone.length >= 1) candidatos = byPhone;\n    else {\n      const byName = candidatos.filter(p => norm(p.TRANSPORTISTA).split(' ').filter(w => w.length > 3).some(w => ref.includes(w)));\n      if (byName.length >= 1) candidatos = byName;\n    }\n  }\n  if (candidatos.length !== 1) {\n      if (candidatos.length === 0 && d.ESTADO === 'SIN_MATCH') continue; // reintento silencioso\n      if (candidatos.length > 1 && d.ESTADO === 'AMBIGUO') continue; // ya alertado, espera revisión humana\n      out.push({ json: { accion: candidatos.length === 0 ? 'SIN_MATCH_TRANSPORTE' : 'AMBIGUO', doc: d, motivo: candidatos.length + ' candidatos en TRANSPORTES_PAGOS' } }); continue;\n    }\n  const p = candidatos[0];\n  // Anti-duplicado nivel comprobante: ¿ya hay un pago PAGADO con este ID_DOC_WA o mismo valor+transportista+fecha?\n  const yaPagado = pagos.find(x => x.ESTADO === 'PAGADO' && (x.ID_DOC_WA === d.ID_DOC || (Math.abs(parseFloat(x.VALOR)-val)<=1 && norm(x.TRANSPORTISTA)===norm(p.TRANSPORTISTA) && x.FECHA_PAGO === d.OCR_FECHA_PAGO)));\n  if (yaPagado) {\n    out.push({ json: { accion: 'DUPLICADO', doc: d, pago: p, motivo: 'Ya existe pago ' + yaPagado.ID_PAGO + ' con mismo valor/transportista/fecha' } });\n    continue;\n  }\n  // Anti-duplicado nivel banco: ¿existe ya el egreso real en el extracto?\n  const movReal = movs.find(m => { if (m.ID_CONCILIACION) return false; const mv = parseFloat(m.VALOR); if (!(mv <= -val + 1 && mv >= -val - 1) || m.TIPO !== 'EGRESO') return false; const fd = parseF(d.OCR_FECHA_PAGO), fm2 = parseF(m.FECHA); if (fd && fm2) return Math.abs((fm2 - fd) / 86400000) <= 3; return true; });\n  const sol = sols.find(s => s.ID_SOLICITUD === p.ID_SOLICITUD) || {};\n  out.push({ json: { accion: 'MATCH', doc: d, pago: p, sol, esAbono, valorPagado: val, movRealExistente: movReal ? movReal.ID_MOV : '' } });\n}\nreturn out;"
+      },
+      "id": "n5",
+      "name": "Motor de matching transportes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "MATCH",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "MATCH"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "DUPLICADO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "DUPLICADO"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "MATCH",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "OTRO"
+            }
+          ]
+        }
+      },
+      "id": "n6",
+      "name": "¿Resultado?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        720,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "TRANSPORTES_PAGOS"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ID_PAGO"
+          ],
+          "value": {
+            "ID_PAGO": "={{ $json.pago.ID_PAGO }}",
+            "TIPO": "={{ $json.esAbono ? 'ABONO' : $json.pago.TIPO }}",
+            "VALOR": "={{ $json.valorPagado }}",
+            "FECHA_PAGO": "={{ $json.doc.OCR_FECHA_PAGO }}",
+            "URL_COMPROBANTE": "={{ $json.doc.URL_DRIVE }}",
+            "ESTADO": "PAGADO",
+            "ID_DOC_WA": "={{ $json.doc.ID_DOC }}",
+            "NOTAS": "={{ $json.esAbono ? 'Abono parcial; saldo queda en la solicitud' : 'Pago total' }}",
+            "HUMAN_REVIEW": "PENDIENTE"
+          }
+        },
+        "options": {}
+      },
+      "id": "n7",
+      "name": "Marcar pago PAGADO",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        980,
+        -180
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Si fue ABONO, crear nueva fila PENDIENTE por el saldo y actualizar estado de la solicitud\nconst j = $('¿Resultado?').item.json;\nconst items = [];\nconst saldo = parseFloat(j.pago.VALOR) - j.valorPagado;\nif (j.esAbono && saldo > 1) {\n  items.push({ json: { crearSaldo: true, fila: {\n    ID_PAGO: 'TRP-' + Date.now().toString().slice(-9),\n    ID_SOLICITUD: j.pago.ID_SOLICITUD,\n    ID_COMPRA: j.pago.ID_COMPRA,\n    TRANSPORTISTA: j.pago.TRANSPORTISTA,\n    CEDULA: j.pago.CEDULA,\n    TIPO: 'SALDO',\n    VALOR: saldo,\n    MEDIO_PAGO: j.pago.MEDIO_PAGO,\n    ESTADO: 'PENDIENTE',\n    NOTAS: 'Saldo tras abono ' + j.pago.ID_PAGO\n  }, estadoSolicitud: 'PARCIAL', j }});\n} else {\n  items.push({ json: { crearSaldo: false, estadoSolicitud: 'PAGADO', j }});\n}\nreturn items;"
+      },
+      "id": "n8",
+      "name": "Gestionar abono / saldo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "TRANSPORTES_SOLICITUDES"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ID_SOLICITUD"
+          ],
+          "value": {
+            "ID_SOLICITUD": "={{ $json.j.pago.ID_SOLICITUD }}",
+            "ESTADO": "={{ $json.estadoSolicitud }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "n9",
+      "name": "Actualizar estado solicitud",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1420,
+        -180
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Registrar el egreso en BANCOS_MOV evitando duplicados:\n// si el egreso real ya está en el extracto, solo lo vinculamos; si no, creamos fila proyectada.\nconst d = $('Gestionar abono / saldo').item.json.j;\nif (d.movRealExistente) {\n  return [{ json: { modo: 'VINCULAR', ID_MOV: d.movRealExistente, idPago: d.pago.ID_PAGO } }];\n}\nreturn [{ json: { modo: 'CREAR', fila: {\n  ID_MOV: 'MOV-' + Date.now().toString().slice(-9),\n  FECHA: d.doc.OCR_FECHA_PAGO,\n  CUENTA: d.pago.CUENTA_ORIGEN || 'BC-CTE-3762',\n  DESCRIPCION: 'Pago transportista ' + d.pago.TRANSPORTISTA,\n  REFERENCIA: d.pago.ID_PAGO,\n  MONEDA: 'COP',\n  VALOR: -Math.abs(d.valorPagado), // = neto real que salió del banco según el comprobante\n  TIPO: 'EGRESO',\n  CATEGORIA: 'TRANSPORTE',\n  DETALLE: 'Cta cobro ' + (d.sol.CUENTA_COBRO || '') + ' Rem ' + (d.sol.REMISION || '') + ' via ' + d.pago.MEDIO_PAGO,\n  FACTURA_OC: d.pago.ID_COMPRA,\n  TERCERO: d.pago.TRANSPORTISTA + ' CC ' + d.pago.CEDULA,\n  ID_CONCILIACION: d.pago.ID_PAGO,\n  ESTADO_CONTABLE: 'PENDIENTE',\n  ORIGEN: 'TRANSPORTE_APP'\n}, idPago: d.pago.ID_PAGO }}];"
+      },
+      "id": "n10",
+      "name": "Preparar registro bancario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.modo }}",
+              "rightValue": "CREAR",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "id": "n11",
+      "name": "¿Crear o vincular?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "BANCOS_MOV"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID_MOV": "={{ $json.fila.ID_MOV }}",
+            "FECHA": "={{ $json.fila.FECHA }}",
+            "CUENTA": "={{ $json.fila.CUENTA }}",
+            "DESCRIPCION": "={{ $json.fila.DESCRIPCION }}",
+            "REFERENCIA": "={{ $json.fila.REFERENCIA }}",
+            "MONEDA": "COP",
+            "VALOR": "={{ $json.fila.VALOR }}",
+            "TIPO": "EGRESO",
+            "CATEGORIA": "TRANSPORTE",
+            "DETALLE": "={{ $json.fila.DETALLE }}",
+            "FACTURA_OC": "={{ $json.fila.FACTURA_OC }}",
+            "TERCERO": "={{ $json.fila.TERCERO }}",
+            "ID_CONCILIACION": "={{ $json.fila.ID_CONCILIACION }}",
+            "ESTADO_CONTABLE": "PENDIENTE",
+            "ORIGEN": "TRANSPORTE_APP",
+            "HUMAN_REVIEW": "PENDIENTE"
+          }
+        },
+        "options": {}
+      },
+      "id": "n12",
+      "name": "Crear movimiento proyectado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2080,
+        -260
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "BANCOS_MOV"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ID_MOV"
+          ],
+          "value": {
+            "ID_MOV": "={{ $json.ID_MOV }}",
+            "CATEGORIA": "TRANSPORTE",
+            "ID_CONCILIACION": "={{ $json.idPago }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "n13",
+      "name": "Vincular movimiento real del extracto",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2080,
+        -100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPROBANTES_WA"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ID_DOC"
+          ],
+          "value": {
+            "ID_DOC": "={{ $('Gestionar abono / saldo').item.json.j.doc.ID_DOC }}",
+            "ID_MOV_MATCH": "={{ $json.ID_MOV || $json.fila?.ID_MOV }}",
+            "ESTADO": "CONCILIADO_TRANSPORTE",
+            "HUMAN_REVIEW": "PENDIENTE"
+          }
+        },
+        "options": {}
+      },
+      "id": "n14",
+      "name": "Cerrar comprobante",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2300,
+        -180
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=✅ *Pago a transportista confirmado*\\n{{ $('Gestionar abono / saldo').item.json.j.pago.ID_PAGO }} · {{ $('Gestionar abono / saldo').item.json.j.pago.TRANSPORTISTA }}\\nValor: ${{ $('Gestionar abono / saldo').item.json.j.valorPagado }} ({{ $('Gestionar abono / saldo').item.json.j.esAbono ? 'ABONO' : 'TOTAL' }})\\nID compra: {{ $('Gestionar abono / saldo').item.json.j.pago.ID_COMPRA }}\\nComprobante: {{ $('Gestionar abono / saldo').item.json.j.doc.URL_DRIVE }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "n15",
+      "name": "Notificar pago confirmado",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2520,
+        -180
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPROBANTES_WA"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ID_DOC"
+          ],
+          "value": {
+            "ID_DOC": "={{ $json.doc.ID_DOC }}",
+            "ESTADO": "DUPLICADO",
+            "NOTAS": "={{ $json.motivo }}",
+            "HUMAN_REVIEW": "PENDIENTE"
+          }
+        },
+        "options": {}
+      },
+      "id": "n16",
+      "name": "Marcar comprobante DUPLICADO",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        980,
+        60
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=🔴 *POSIBLE PAGO DUPLICADO a transportista*\\nComprobante {{ $json.doc.ID_DOC }} · {{ $json.pago.TRANSPORTISTA }}\\nValor: ${{ $json.doc.OCR_VALOR }}\\n{{ $json.motivo }}\\nRevisar antes de cualquier otro pago: {{ $json.doc.URL_DRIVE }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "n17",
+      "name": "Alerta DUPLICADO",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        60
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=⚠️ Comprobante de egreso sin match en transportes\\n{{ $json.doc.ID_DOC }} · ${{ $json.doc.OCR_VALOR }}\\n{{ $json.motivo }}\\n{{ $json.doc.URL_DRIVE }}",
+        "additionalFields": {}
+      },
+      "id": "n18",
+      "name": "Alerta sin match / ambiguo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        980,
+        260
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPROBANTES_WA"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ID_DOC"
+          ],
+          "value": {
+            "ID_DOC": "={{ $json.doc.ID_DOC }}",
+            "ESTADO": "={{ $json.accion === 'AMBIGUO' ? 'AMBIGUO' : ($json.accion === 'ERROR' ? 'ERROR' : 'SIN_MATCH') }}",
+            "NOTAS": "={{ $json.motivo || '' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "nx1",
+      "name": "Marcar estado del problema",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        980,
+        380
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 30 minutos": {
+      "main": [
+        [
+          {
+            "node": "Leer comprobantes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer comprobantes": {
+      "main": [
+        [
+          {
+            "node": "Leer TRANSPORTES_PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer TRANSPORTES_PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Leer TRANSPORTES_SOLICITUDES",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer TRANSPORTES_SOLICITUDES": {
+      "main": [
+        [
+          {
+            "node": "Leer BANCOS_MOV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer BANCOS_MOV": {
+      "main": [
+        [
+          {
+            "node": "Motor de matching transportes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Motor de matching transportes": {
+      "main": [
+        [
+          {
+            "node": "¿Resultado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Resultado?": {
+      "main": [
+        [
+          {
+            "node": "Marcar pago PAGADO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar comprobante DUPLICADO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar estado del problema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar pago PAGADO": {
+      "main": [
+        [
+          {
+            "node": "Gestionar abono / saldo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gestionar abono / saldo": {
+      "main": [
+        [
+          {
+            "node": "Actualizar estado solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar estado solicitud": {
+      "main": [
+        [
+          {
+            "node": "Preparar registro bancario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar registro bancario": {
+      "main": [
+        [
+          {
+            "node": "¿Crear o vincular?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Crear o vincular?": {
+      "main": [
+        [
+          {
+            "node": "Crear movimiento proyectado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Vincular movimiento real del extracto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear movimiento proyectado": {
+      "main": [
+        [
+          {
+            "node": "Cerrar comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vincular movimiento real del extracto": {
+      "main": [
+        [
+          {
+            "node": "Cerrar comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cerrar comprobante": {
+      "main": [
+        [
+          {
+            "node": "Notificar pago confirmado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar comprobante DUPLICADO": {
+      "main": [
+        [
+          {
+            "node": "Alerta DUPLICADO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar estado del problema": {
+      "main": [
+        [
+          {
+            "node": "Alerta sin match / ambiguo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

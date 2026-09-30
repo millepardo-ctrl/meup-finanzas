@@ -1,0 +1,626 @@
+{
+  "name": "MeUp WF-01 v2 · WhatsApp Router: comprobantes + solicitudes de transporte",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meup-whatsapp-webhook",
+        "options": {}
+      },
+      "id": "n1",
+      "name": "Webhook WhatsApp Cloud API",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "meup-whatsapp-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];\nif (!msg) return [];\nconst contact = $json.body.entry[0].changes[0].value.contacts?.[0] || {};\nconst media = msg.image || msg.document || null;\nconst texto = msg.text?.body || msg.caption || media?.caption || '';\n// Heurística de ruteo: es SOLICITUD si es texto (sin adjunto) y menciona pago + datos de transporte\nconst t = texto.toUpperCase();\nconst esSolicitud = !media && (\n  (t.includes('PAGO') || t.includes('PAGAR')) &&\n  (t.includes('CUENTA DE COBRO') || t.includes('REMISION') || t.includes('REMISIÓN') || t.includes('TRANSPORT') || t.includes('CEDULA') || t.includes('CÉDULA'))\n);\nlet idCompraRef = null;\nif (!media && !esSolicitud) {\n  const m = t.match(/\\b(?:ID|COMPRA|COTIZACION|COTIZACIÓN)\\s*[:#.]?\\s*(\\d{4,6})\\b/) || t.match(/^\\s*(\\d{4,6})\\s*$/);\n  if (m) idCompraRef = parseInt(m[1]);\n}\nreturn [{ json: {\n  ruta: media ? 'COMPROBANTE' : (esSolicitud ? 'SOLICITUD_TRANSPORTE' : (idCompraRef ? 'REFERENCIA_ID' : 'IGNORAR')),\n  id_compra_ref: idCompraRef,\n  wa_from: msg.from,\n  wa_name: contact.profile?.name || '',\n  wa_msg_id: msg.id,\n  wa_timestamp: new Date(parseInt(msg.timestamp) * 1000).toISOString(),\n  texto,\n  media_id: media?.id || null,\n  mime_type: media?.mime_type || null,\n  filename: media?.filename || (media ? 'comprobante_' + msg.id + (media.mime_type === 'application/pdf' ? '.pdf' : '.jpg') : null)\n}}];"
+      },
+      "id": "n2",
+      "name": "Clasificar mensaje (adjunto vs solicitud)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "COMPROBANTE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "COMPROBANTE"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "SOLICITUD_TRANSPORTE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "SOLICITUD"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "REFERENCIA_ID",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "REFERENCIA"
+            }
+          ]
+        }
+      },
+      "id": "n3",
+      "name": "Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v20.0/{{ $json.media_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "n4",
+      "name": "Obtener URL del media (Meta)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        -160
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_CRED_META",
+          "name": "Meta WhatsApp Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "n5",
+      "name": "Descargar archivo binario",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        -160
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_CRED_META",
+          "name": "Meta WhatsApp Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "={{ $('Clasificar mensaje (adjunto vs solicitud)').first().json.wa_timestamp.slice(0,10) }}_{{ $('Clasificar mensaje (adjunto vs solicitud)').first().json.wa_from }}_{{ $('Clasificar mensaje (adjunto vs solicitud)').first().json.filename }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1b1EQ6MBkrmelxDnDDjFJlWpjq3J5U6-I"
+        },
+        "options": {}
+      },
+      "id": "n6",
+      "name": "Subir a Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        -160
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// IMPORTANTE: este nodo recibe su entrada DIRECTO del nodo de descarga (con binario).\n// 'Subir a Google Drive' corre en rama paralela; 'Parsear resultado OCR' lee su salida por referencia.\nconst b64 = Buffer.from(await this.helpers.getBinaryDataBuffer(0, 'data')).toString('base64');\nconst mime = $('Clasificar mensaje (adjunto vs solicitud)').first().json.mime_type;\nconst isPdf = mime === 'application/pdf';\nconst block = isPdf\n  ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }\n  : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };\nreturn [{ json: { anthropic_body: {\n  model: 'claude-sonnet-4-6', max_tokens: 1024,\n  messages: [{ role: 'user', content: [ block, { type: 'text', text: `Eres el sistema OCR contable de MeUp (Colombia). Analiza este documento y responde SOLO con JSON válido, sin markdown, con esta estructura:\\n{\\n \\\"clasificacion\\\": \\\"COMPROBANTE_PAGO|FACTURA|EXTRACTO|OTRO\\\",\\n \\\"direccion\\\": \\\"RECIBIDO|ENVIADO|DESCONOCIDO\\\",\\n \\\"fecha_pago\\\": \\\"YYYY-MM-DD o null\\\",\\n \\\"valor\\\": numero o null,\\n \\\"moneda\\\": \\\"COP|USD\\\",\\n \\\"banco_origen\\\": \\\"string o null\\\",\\n \\\"banco_destino\\\": \\\"string o null\\\",\\n \\\"medio\\\": \\\"NEQUI|DAVIPLATA|BANCOLOMBIA|PSE|OTRO\\\",\\n \\\"referencia\\\": \\\"string o null\\\",\\n \\\"nombre_pagador\\\": \\\"string o null\\\",\\n \\\"nombre_destinatario\\\": \\\"string o null\\\",\\n \\\"telefono_destino\\\": \\\"string o null\\\",\\n \\\"destino_es_meup\\\": true|false|null,\\n \\\"origen_es_meup\\\": true|false|null,\\n \\\"confianza\\\": \\\"ALTA|MEDIA|BAJA\\\",\\n \\\"observaciones\\\": \\\"string\\\"\\n}\\nCUENTAS E IDENTIFICADORES DE MEUP (la empresa receptora): nombre contiene MEUP o ME UP; NIT 900570024; cuentas Bancolombia corriente terminada en 3762, Bancolombia ahorros 8985, Davivienda ahorros 4335, Davivienda corriente 6614, Banco Agrario 9030, Bancolombia Panamá 3826.\\nREGLAS:\\n- destino_es_meup = true si el beneficiario/cuenta destino coincide con los identificadores de MeUp; false si claramente es otra persona/empresa; null si no se ve.\\n- origen_es_meup = igual pero para el pagador/cuenta origen.\\n- Un cliente pagando a MeUp genera un pantallazo donde el dinero SALE de su cuenta HACIA MeUp: eso es destino_es_meup=true (es un INGRESO para MeUp aunque diga 'Enviaste').\\n- punto = separador de miles (700.000 = 700000).\\n- En Nequi/Daviplata el teléfono destino suele ser visible: extráelo en telefono_destino.` } ] }]\n}}}];"
+      },
+      "id": "n7",
+      "name": "Preparar petición OCR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.anthropic_body) }}",
+        "options": {}
+      },
+      "id": "n8",
+      "name": "OCR con Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        -160
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_CRED_ANTHROPIC",
+          "name": "Anthropic x-api-key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let p = { clasificacion: 'OTRO', confianza: 'BAJA', observaciones: 'Error de parseo OCR' };\ntry {\n  const raw = $json.content.filter(b => b.type === 'text').map(b => b.text).join('');\n  p = JSON.parse(raw.replace(/```json|```/g, '').trim());\n} catch (e) {}\nconst meta = $('Clasificar mensaje (adjunto vs solicitud)').first().json;\nconst drive = $('Subir a Google Drive').first().json;\n// Clasificación por FLUJO DE DINERO respecto a MeUp (no por la dirección del pantallazo):\n// destino = MeUp → ingreso de cliente; origen = MeUp → egreso; ambiguo → pista del caption; default = pago de cliente.\nlet clasif = p.clasificacion;\nif (p.clasificacion === 'COMPROBANTE_PAGO') {\n  const cap = (meta.texto || '').toUpperCase();\n  if (p.destino_es_meup === true) clasif = 'COMPROBANTE_PAGO';\n  else if (p.origen_es_meup === true && p.destino_es_meup !== true) clasif = 'COMPROBANTE_EGRESO';\n  else if (/TRANSPORTISTA|FLETE|CUENTA DE COBRO|REMISION|REMISIÓN/.test(cap)) clasif = 'COMPROBANTE_EGRESO';\n  else clasif = 'COMPROBANTE_PAGO';\n}\nconst esEgreso = clasif === 'COMPROBANTE_EGRESO';\nreturn [{ json: {\n  ID_DOC: 'WA-' + Date.now().toString().slice(-9),\n  FECHA_RECIBIDO: meta.wa_timestamp.replace('T',' ').slice(0,16),\n  REMITENTE_WA: '+' + meta.wa_from,\n  NOMBRE_CONTACTO: meta.wa_name,\n  TIPO_ARCHIVO: meta.mime_type,\n  URL_DRIVE: drive.webViewLink || ('https://drive.google.com/file/d/' + drive.id),\n  OCR_ESTADO: p.confianza === 'BAJA' ? 'REVISAR' : 'OK',\n  OCR_FECHA_PAGO: p.fecha_pago || '',\n  OCR_VALOR: p.valor || '',\n  OCR_BANCO_ORIGEN: p.banco_origen || '',\n  OCR_BANCO_DESTINO: (p.banco_destino || p.medio || ''),\n  OCR_REFERENCIA: [p.referencia, p.telefono_destino].filter(Boolean).join(' | '),\n  OCR_CLIENTE: esEgreso ? (p.nombre_destinatario || '') : (p.nombre_pagador || ''),\n  OCR_CONFIANZA: p.confianza,\n  CLASIFICACION: clasif,\n  ID_MOV_MATCH: '',\n  ESTADO: p.clasificacion === 'COMPROBANTE_PAGO' ? 'PROCESADO' : 'REVISAR',\n  RECIBO_SIIGO: '',\n  NOTAS: (p.observaciones || '') + (meta.texto ? ' | Caption: ' + meta.texto : ''),\n  HUMAN_REVIEW: 'PENDIENTE'\n}}];"
+      },
+      "id": "n9",
+      "name": "Parsear resultado OCR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPROBANTES_WA"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "n10",
+      "name": "Registrar en COMPROBANTES_WA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2000,
+        -160
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REEMPLAZAR_ID_WORKFLOW_WF07"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "n11",
+      "name": "Enviar a WF-07 (solicitud transporte)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Cambios v2 respecto a WF-01\n1. El IF se reemplazó por un clasificador + Switch: adjunto → ruta OCR; texto con patrón de solicitud de pago → WF-07; otros textos se ignoran.\n2. El prompt OCR ahora extrae 'direccion' (ENVIADO/RECIBIDO), medio (NEQUI/DAVIPLATA), destinatario y teléfono destino → así WF-08 distingue pagos A transportistas de pagos DE clientes.\n3. Los comprobantes ENVIADOS se clasifican COMPROBANTE_EGRESO y WF-02 (clientes) los ignora; los toma WF-08.\n\n⚠️ Importar WF-07 primero y poner su ID en el nodo 'Enviar a WF-07'.\nEste flujo REEMPLAZA a WF01_whatsapp_comprobantes (desactivar el v1).",
+        "height": 340,
+        "width": 440
+      },
+      "id": "note1",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPROBANTES_WA"
+        },
+        "options": {}
+      },
+      "id": "nr1",
+      "name": "Leer comprobantes recientes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        680,
+        340
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Busca el comprobante MÁS RECIENTE del mismo remitente (ventana de 60 min) y le asigna la ID de compra\nconst meta = $('Clasificar mensaje (adjunto vs solicitud)').first().json;\nconst filas = $('Leer comprobantes recientes').all().map(i => i.json);\nconst remitente = 'tg:' + meta.wa_from;\nconst ahora = new Date(meta.wa_timestamp).getTime();\nconst candidatas = filas\n  .filter(f => f.REMITENTE_WA === remitente && f.FECHA_RECIBIDO)\n  .map(f => ({ f, ts: new Date(String(f.FECHA_RECIBIDO).replace(' ', 'T')).getTime() }))\n  .filter(x => !isNaN(x.ts) && (ahora - x.ts) >= 0 && (ahora - x.ts) <= 60 * 60 * 1000)\n  .sort((a, b) => b.ts - a.ts);\nif (candidatas.length === 0) {\n  return [{ json: { encontrado: false, id_compra: meta.id_compra_ref, remitente, aviso: 'Llegó la referencia de compra ' + meta.id_compra_ref + ' pero no hay comprobante de ' + (meta.wa_name || remitente) + ' en la última hora.' } }];\n}\nconst c = candidatas[0].f;\nreturn [{ json: { encontrado: true, ID_DOC: c.ID_DOC, id_compra: meta.id_compra_ref, nombre: meta.wa_name,\n  notas_nuevas: ((c.NOTAS || '') + ' | ID compra informada por asesor: ' + meta.id_compra_ref).slice(0, 500) } }];"
+      },
+      "id": "nr2",
+      "name": "Vincular ID de compra al último comprobante",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.encontrado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "id": "nr3",
+      "name": "¿Comprobante encontrado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPROBANTES_WA"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ID_DOC"
+          ],
+          "value": {
+            "ID_DOC": "={{ $json.ID_DOC }}",
+            "ID_COMPRA_INFORMADO": "={{ $json.id_compra }}",
+            "NOTAS": "={{ $json.notas_nuevas }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "nr4",
+      "name": "Guardar ID de compra en el comprobante",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1340,
+        260
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=✅ Comprobante {{ $('Vincular ID de compra al último comprobante').first().json.ID_DOC }} vinculado a la compra {{ $('Vincular ID de compra al último comprobante').first().json.id_compra }}",
+        "additionalFields": {}
+      },
+      "id": "nr5",
+      "name": "Confirmar vínculo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1560,
+        260
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5154074469",
+        "text": "=⚠️ {{ $json.aviso }} Reenvíen primero el comprobante y luego el texto con la ID.",
+        "additionalFields": {}
+      },
+      "id": "nr6",
+      "name": "Aviso sin comprobante",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1340,
+        420
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp Cloud API": {
+      "main": [
+        [
+          {
+            "node": "Clasificar mensaje (adjunto vs solicitud)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar mensaje (adjunto vs solicitud)": {
+      "main": [
+        [
+          {
+            "node": "Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router": {
+      "main": [
+        [
+          {
+            "node": "Obtener URL del media (Meta)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar a WF-07 (solicitud transporte)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Leer comprobantes recientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener URL del media (Meta)": {
+      "main": [
+        [
+          {
+            "node": "Descargar archivo binario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar archivo binario": {
+      "main": [
+        [
+          {
+            "node": "Subir a Google Drive",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Preparar petición OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar petición OCR": {
+      "main": [
+        [
+          {
+            "node": "OCR con Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR con Claude": {
+      "main": [
+        [
+          {
+            "node": "Parsear resultado OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear resultado OCR": {
+      "main": [
+        [
+          {
+            "node": "Registrar en COMPROBANTES_WA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer comprobantes recientes": {
+      "main": [
+        [
+          {
+            "node": "Vincular ID de compra al último comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vincular ID de compra al último comprobante": {
+      "main": [
+        [
+          {
+            "node": "¿Comprobante encontrado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Comprobante encontrado?": {
+      "main": [
+        [
+          {
+            "node": "Guardar ID de compra en el comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso sin comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar ID de compra en el comprobante": {
+      "main": [
+        [
+          {
+            "node": "Confirmar vínculo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

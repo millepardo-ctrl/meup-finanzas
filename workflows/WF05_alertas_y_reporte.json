@@ -1,0 +1,211 @@
+{
+  "name": "MeUp WF-05 · Alertas diarias y reporte semanal",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1-6"
+            }
+          ]
+        }
+      },
+      "id": "n1",
+      "name": "Todos los días 7:00 am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPROBANTES_WA"
+        },
+        "options": {}
+      },
+      "id": "n2",
+      "name": "Leer COMPROBANTES_WA",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        -100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "BANCOS_MOV"
+        },
+        "options": {}
+      },
+      "id": "n3",
+      "name": "Leer BANCOS_MOV",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CREDITOS"
+        },
+        "options": {}
+      },
+      "id": "n4",
+      "name": "Leer CREDITOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const docs = (function(){ try { return $('Leer COMPROBANTES_WA').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst movs = (function(){ try { return $('Leer BANCOS_MOV').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst creds = (function(){ try { return $('Leer CREDITOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst hoy = new Date();\nconst hace7 = new Date(hoy - 7*86400000);\n\nconst sinMatch = docs.filter(d => ['SIN_MATCH','AMBIGUO','ERROR','REVISAR'].includes(d.ESTADO));\nconst pendCont = movs.filter(m => m.ESTADO_CONTABLE === 'PENDIENTE' && m.TIPO !== 'TRASLADO');\nconst ingSem = movs.filter(m => m.TIPO === 'INGRESO' && new Date(m.FECHA) >= hace7).reduce((s,m) => s + (parseFloat(m.VALOR)||0), 0);\nconst egrSem = movs.filter(m => m.TIPO === 'EGRESO' && new Date(m.FECHA) >= hace7).reduce((s,m) => s + (parseFloat(m.VALOR)||0), 0);\nconst credVig = creds.filter(c => c.ESTADO === 'VIGENTE');\n\nconst fmt = n => '$' + Math.round(n).toLocaleString('es-CO');\nlet txt = `📊 *MeUp · Resumen financiero ${hoy.toISOString().slice(0,10)}*\\n\\n`;\ntxt += `Ingresos últimos 7 días: ${fmt(ingSem)}\\n`;\ntxt += `Egresos últimos 7 días: ${fmt(egrSem)}\\n`;\ntxt += `Flujo neto: ${fmt(ingSem + egrSem)}\\n\\n`;\ntxt += `⚠️ Comprobantes por revisar: ${sinMatch.length}\\n`;\nsinMatch.slice(0,5).forEach(d => { txt += `  · ${d.ID_DOC} ${d.OCR_CLIENTE || d.NOMBRE_CONTACTO || '?'} ${d.OCR_VALOR ? fmt(parseFloat(d.OCR_VALOR)) : ''} [${d.ESTADO}]\\n`; });\ntxt += `\\n📌 Movimientos sin contabilizar en SIIGO: ${pendCont.length}\\n`;\ntxt += `\\n🏦 Créditos vigentes: ${credVig.length}\\n`;\ncredVig.forEach(c => { txt += `  · ${c.BANCO} ${c.NUMERO_CREDITO} ${c.MONEDA} ${c.VALOR_COP || c.VALOR_USD}\\n`; });\nreturn [{ json: { texto: txt, alertas: sinMatch.length + pendCont.length } }];"
+      },
+      "id": "n5",
+      "name": "Construir resumen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "-5559621779",
+        "text": "={{ $json.texto }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "n6",
+      "name": "Enviar resumen Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        680,
+        100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Todos los días 7:00 am": {
+      "main": [
+        [
+          {
+            "node": "Leer COMPROBANTES_WA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer COMPROBANTES_WA": {
+      "main": [
+        [
+          {
+            "node": "Leer BANCOS_MOV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer BANCOS_MOV": {
+      "main": [
+        [
+          {
+            "node": "Leer CREDITOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer CREDITOS": {
+      "main": [
+        [
+          {
+            "node": "Construir resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construir resumen": {
+      "main": [
+        [
+          {
+            "node": "Enviar resumen Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "name": "MeUp WF-06 · Importaciones: registro de pagos y actualización de saldos",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meup-pago-importacion",
+        "options": {}
+      },
+      "id": "n1", "name": "Webhook registrar pago (desde Lovable o formulario)",
+      "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 0],
+      "webhookId": "meup-pago-importacion"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Payload esperado: { id_import, tipo_pago, fecha, moneda, valor, trm, cuenta_origen, comprobante, notas }\nconst b = $json.body;\nconst req = ['id_import','tipo_pago','fecha','valor'];\nfor (const k of req) { if (!b[k]) throw new Error('Falta el campo: ' + k); }\nconst tiposValidos = ['INVOICE','NEGINTCOMEX','NAVIERA','IVA_DIM','OTRO'];\nif (!tiposValidos.includes(b.tipo_pago)) throw new Error('tipo_pago debe ser: ' + tiposValidos.join('|'));\nconst valor = parseFloat(b.valor);\nconst trm = parseFloat(b.trm) || '';\nreturn [{ json: {\n  ID_PAGO: 'PGI-' + Date.now().toString().slice(-8),\n  ID_IMPORT: b.id_import,\n  TIPO_PAGO: b.tipo_pago,\n  FECHA: b.fecha,\n  MONEDA: b.moneda || 'USD',\n  VALOR: valor,\n  TRM_PAGO: trm,\n  VALOR_COP: (b.moneda === 'COP') ? valor : (trm ? Math.round(valor * trm) : ''),\n  CUENTA_ORIGEN: b.cuenta_origen || '',\n  COMPROBANTE_SIIGO: b.comprobante || '',\n  NOTAS: b.notas || ''\n}}];"
+      },
+      "id": "n2", "name": "Validar y estructurar pago",
+      "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {"__rl": true, "mode": "id", "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"},
+        "sheetName": {"__rl": true, "mode": "name", "value": "IMPORTACIONES_PAGOS"},
+        "columns": {"mappingMode": "autoMapInputData"},
+        "options": {}
+      },
+      "id": "n3", "name": "Registrar en IMPORTACIONES_PAGOS",
+      "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [440, 0],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "REEMPLAZAR_CRED_GSHEETS", "name": "Google Sheets MeUp"}}
+    },
+    {
+      "parameters": {
+        "documentId": {"__rl": true, "mode": "id", "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"},
+        "sheetName": {"__rl": true, "mode": "name", "value": "IMPORTACIONES"},
+        "filtersUI": {"values": [{"lookupColumn": "ID_IMPORT", "lookupValue": "={{ $('Validar y estructurar pago').item.json.ID_IMPORT }}"}]},
+        "options": {}
+      },
+      "id": "n4", "name": "Leer importación",
+      "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [660, 0],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "REEMPLAZAR_CRED_GSHEETS", "name": "Google Sheets MeUp"}}
+    },
+    {
+      "parameters": {
+        "conditions": {"options": {}, "conditions": [
+          {"leftValue": "={{ parseFloat($json.SALDO_PEND_USD) || 0 }}", "rightValue": 1, "operator": {"type": "number", "operation": "smaller"}}
+        ]}
+      },
+      "id": "n5", "name": "¿Invoice pagado al 100%?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {"__rl": true, "mode": "id", "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"},
+        "sheetName": {"__rl": true, "mode": "name", "value": "IMPORTACIONES"},
+        "columns": {"mappingMode": "defineBelow", "matchingColumns": ["ID_IMPORT"], "value": {
+          "ID_IMPORT": "={{ $json.ID_IMPORT }}",
+          "ESTADO": "PAGADA"
+        }},
+        "options": {}
+      },
+      "id": "n6", "name": "Marcar importación PAGADA",
+      "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [1100, -80],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "REEMPLAZAR_CRED_GSHEETS", "name": "Google Sheets MeUp"}}
+    },
+    {
+      "parameters": {
+        "chatId": "-5559621779",
+        "text": "=💸 Pago de importación registrado\\n{{ $('Validar y estructurar pago').item.json.ID_IMPORT }} · {{ $('Validar y estructurar pago').item.json.TIPO_PAGO }}\\n{{ $('Validar y estructurar pago').item.json.MONEDA }} {{ $('Validar y estructurar pago').item.json.VALOR }}",
+        "additionalFields": {}
+      },
+      "id": "n7", "name": "Notificar pago",
+      "type": "n8n-nodes-base.telegram", "typeVersion": 1.2, "position": [1100, 120],
+      "credentials": {"telegramApi": {"id": "REEMPLAZAR_CRED_TELEGRAM", "name": "Telegram MeUp Bot"}}
+    },
+    {
+      "parameters": {"respondWith": "json", "responseBody": "={ \"ok\": true, \"id_pago\": $('Validar y estructurar pago').item.json.ID_PAGO }", "options": {}},
+      "id": "n8", "name": "Responder OK",
+      "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1320, 0]
+    }
+  ],
+  "connections": {
+    "Webhook registrar pago (desde Lovable o formulario)": {"main": [[{"node": "Validar y estructurar pago", "type": "main", "index": 0}]]},
+    "Validar y estructurar pago": {"main": [[{"node": "Registrar en IMPORTACIONES_PAGOS", "type": "main", "index": 0}]]},
+    "Registrar en IMPORTACIONES_PAGOS": {"main": [[{"node": "Leer importación", "type": "main", "index": 0}]]},
+    "Leer importación": {"main": [[{"node": "¿Invoice pagado al 100%?", "type": "main", "index": 0}]]},
+    "¿Invoice pagado al 100%?": {"main": [[{"node": "Marcar importación PAGADA", "type": "main", "index": 0}], [{"node": "Notificar pago", "type": "main", "index": 0}]]},
+    "Marcar importación PAGADA": {"main": [[{"node": "Notificar pago", "type": "main", "index": 0}]]},
+    "Notificar pago": {"main": [[{"node": "Responder OK", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"}
+}

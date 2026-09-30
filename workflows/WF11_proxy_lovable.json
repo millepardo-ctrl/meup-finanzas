@@ -1,0 +1,83 @@
+{
+  "name": "MeUp WF-11 · Proxy de lectura para Lovable (Sheet privado)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "meup-finanzas-data",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "n1", "name": "Webhook GET datos",
+      "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [0, 0],
+      "webhookId": "meup-finanzas-data"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Seguridad: token por header + lista blanca de pestañas\nconst TOKEN = 'REEMPLAZAR_TOKEN_PROXY'; // inventa una clave larga y ponla igual en Lovable\nconst TABLAS = ['DASH_KPI','BANCOS_MOV','COMPROBANTES_WA','IMPORTACIONES','IMPORTACIONES_PAGOS','CREDITOS','INTERESES','TRANSPORTES_SOLICITUDES','TRANSPORTES_PAGOS','COMPRAS_SYMPHONY','COMPRAS_DETALLE','PROVEEDORES_LOCALES_PAGOS','CONCILIACION','CAT_BANCOS','CAT_TERCEROS'];\nconst headers = $json.headers || {};\nconst key = headers['x-api-key'] || headers['X-Api-Key'] || '';\nconst tabla = ($json.query && $json.query.tabla) || '';\nif (key !== TOKEN) return [{ json: { ok: false, status: 401, error: 'Token inválido' } }];\nif (!TABLAS.includes(tabla)) return [{ json: { ok: false, status: 400, error: 'Tabla no permitida. Válidas: ' + TABLAS.join(', ') } }];\nreturn [{ json: { ok: true, tabla } }];"
+      },
+      "id": "n2", "name": "Validar token y tabla",
+      "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {"options": {}, "conditions": [
+          {"leftValue": "={{ $json.ok }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true"}}
+        ]}
+      },
+      "id": "n3", "name": "¿Autorizado?",
+      "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "documentId": {"__rl": true, "mode": "id", "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"},
+        "sheetName": {"__rl": true, "mode": "name", "value": "={{ $json.tabla }}"},
+        "options": {}
+      },
+      "id": "n4", "name": "Leer pestaña",
+      "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [660, -100],
+      "alwaysOutputData": true,
+      "credentials": {"googleSheetsOAuth2Api": {"id": "REEMPLAZAR_CRED_GSHEETS", "name": "Google Sheets MeUp"}}
+    },
+    {
+      "parameters": {
+        "jsCode": "const datos = $input.all().map(i => i.json).filter(x => x && Object.keys(x).length);\nreturn [{ json: {\n  tabla: $('Validar token y tabla').first().json.tabla,\n  actualizado: new Date().toISOString(),\n  n: datos.length,\n  datos\n}}];"
+      },
+      "id": "n5", "name": "Empaquetar respuesta",
+      "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [880, -100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {"responseHeaders": {"entries": [{"name": "Access-Control-Allow-Origin", "value": "*"}, {"name": "Access-Control-Allow-Headers", "value": "x-api-key, content-type"}]}}
+      },
+      "id": "n6", "name": "Responder datos",
+      "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1100, -100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.error }) }}",
+        "options": {"responseCode": "={{ $json.status }}", "responseHeaders": {"entries": [{"name": "Access-Control-Allow-Origin", "value": "*"}, {"name": "Access-Control-Allow-Headers", "value": "x-api-key, content-type"}]}}
+      },
+      "id": "n7", "name": "Responder error",
+      "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [660, 140]
+    },
+    {
+      "parameters": {
+        "content": "## WF-11 Proxy Lovable\nPermite que el dashboard lea el Sheet SIN hacerlo público.\n\nUso desde Lovable:\nGET https://TU-N8N/webhook/meup-finanzas-data?tabla=DASH_KPI\nHeader: x-api-key: <TU_TOKEN>\n\n⚠️ Configurar:\n1. Inventa un token largo (30+ caracteres) y reemplázalo en el nodo 'Validar token y tabla'. El MISMO token va en Lovable.\n2. Asignar credencial de Google Sheets.\n3. Activar el workflow (los webhooks GET solo responden activos).\n4. La URL de producción aparece en el nodo Webhook (pestaña Production URL).",
+        "height": 320, "width": 420
+      },
+      "id": "note1", "name": "Nota", "type": "n8n-nodes-base.stickyNote", "typeVersion": 1, "position": [0, -380]
+    }
+  ],
+  "connections": {
+    "Webhook GET datos": {"main": [[{"node": "Validar token y tabla", "type": "main", "index": 0}]]},
+    "Validar token y tabla": {"main": [[{"node": "¿Autorizado?", "type": "main", "index": 0}]]},
+    "¿Autorizado?": {"main": [[{"node": "Leer pestaña", "type": "main", "index": 0}], [{"node": "Responder error", "type": "main", "index": 0}]]},
+    "Leer pestaña": {"main": [[{"node": "Empaquetar respuesta", "type": "main", "index": 0}]]},
+    "Empaquetar respuesta": {"main": [[{"node": "Responder datos", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"}
+}

@@ -1,0 +1,639 @@
+{
+  "name": "MeUp WF-09 · Carga mensual de compras Symphony",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1WpCKmvNpMgVIia3dp9MWvRMhwDeRDpNP"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "n1",
+      "name": "Nuevo archivo de compras en Drive",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {}
+      },
+      "id": "n2",
+      "name": "Descargar xlsx",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "n3",
+      "name": "Leer hoja Compras",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPRAS_SYMPHONY"
+        },
+        "options": {}
+      },
+      "id": "n4",
+      "name": "Leer compras ya cargadas",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        200
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aplana el maestro-detalle de Symphony y hace UPSERT (solo IDs nuevos se agregan)\nconst rows = $('Leer hoja Compras').all().map(i => i.json);\nlet existentes = new Set();\ntry { existentes = new Set($('Leer compras ya cargadas').all().map(i => parseInt(i.json.ID_COMPRA)).filter(Boolean)); }\ncatch (e) { /* pestaña vacía: tratar todo como nuevo */ }\nlet detExistentes = new Set();\ntry { detExistentes = new Set($('Leer detalle ya cargado').all().map(i => parseInt(i.json.ID_COMPRA)).filter(Boolean)); } catch (e) {}\nlet provExistentes = new Set();\ntry { provExistentes = new Set($('Leer proveedores ya generados').all().map(i => parseInt(i.json.ID_COMPRA)).filter(Boolean)); } catch (e) {}\nconst NIT_PROPIO = '900570024';\nconst num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };\nconst cab = []; const det = []; const provLoc = {};\nlet idActual = null; let lineasPorId = {};\nfor (const r of rows) {\n  const tieneId = r.Id !== null && r.Id !== undefined && String(r.Id).trim() !== '';\n  if (tieneId) idActual = parseInt(r.Id);\n  if (!idActual) continue;\n  const esFilaProducto = r.Productos !== null && r.Productos !== undefined && String(r.Productos).trim() !== '' && String(r.Productos).trim() !== 'nan';\n  if (!esFilaProducto && !tieneId) continue; // descartar solo filas vacías (ej: Retefuente sin producto)\n  if (!lineasPorId[idActual]) lineasPorId[idActual] = [];\n  lineasPorId[idActual].push(r);\n  const nit = r.Proveedor ? String(parseInt(r.Proveedor)) : '';\n  det.push({ ID_COMPRA: idActual, COD_PRODUCTO: r.Productos !== null && r.Productos !== undefined ? String(r.Productos) : '', PRODUCTO: r.NombreProd || '', INFO: String(r.Informacion || '').slice(0, 40), CANTIDAD: num(r.Cantidad), COSTO_TOTAL: Math.round(num(r['Costo Total']) * 100) / 100, VENTA_TOTAL: Math.round(num(r['Venta Total']) * 100) / 100, NIT_PROVEEDOR: nit, TIPO_PROVEEDOR: nit === '' ? 'SIN_NIT' : (nit === NIT_PROPIO ? 'IMPORTADO' : 'LOCAL'), RETENCION_DESC: r['Retenciones Descripcion'] || '', HUMAN_REVIEW: 'PENDIENTE' });\n  if (nit && nit !== NIT_PROPIO) {\n    const k = idActual + '|' + nit;\n    provLoc[k] = (provLoc[k] || 0) + num(r['Costo Total']);\n  }\n  if (r.Id !== null && r.Id !== undefined && String(r.Id).trim() !== '') {\n    cab.push({ raw: r, id: idActual });\n  }\n}\nconst outCab = []; const outUpd = [];\nfor (const { raw: r, id } of cab) {\n  if (existentes.has(id)) {\n    // Carga diaria: el ID ya existe → actualizar campos mutables\n    outUpd.push({ json: { destino: 'CABECERA_UPD', ID_COMPRA: id, ESTADO_SYMPHONY: r.Estado || '', GESTION: r.Gestion || '', COSTO_TRANSPORTE_SYMPHONY: num(r['Costo domicilio']), ABONOS_CLIENTE: num(r['Abonos Valor']), SALDO_CLIENTE: num(r.Saldo), TRANSPORTISTA_SYMPHONY: r.Trasnportista || '' } });\n    continue;\n  }\n  const nits = new Set(lineasPorId[id].map(l => l.Proveedor ? String(parseInt(l.Proveedor)) : '').filter(Boolean));\n  const tipo = nits.size === 0 ? 'SIN_NIT' : (nits.size === 1 && nits.has(NIT_PROPIO) ? 'IMPORTADO' : (nits.has(NIT_PROPIO) ? 'MIXTO' : 'LOCAL'));\n  outCab.push({ json: { destino: 'CABECERA', ID_COMPRA: id, FECHA: r['Fecha de Creación'] || '', CLIENTE: r.Nombre || '', DOCUMENTO: r.Documento || '', CENTRO_COSTO: r['Centro de Costo'] || '', VENDEDOR: r.Vendedor || '', ESTADO_SYMPHONY: r.Estado || '', GESTION: r.Gestion || '', VALOR_VENTA: Math.round(num(r.ValorVenta) * 100) / 100, VALOR_DOMICILIO_COBRADO: num(r['Valor domicilio']), COSTO_TRANSPORTE_SYMPHONY: num(r['Costo domicilio']), TIPO_ORIGEN: tipo, TOTAL_COMPRA: num(r['Total Compra']), ABONOS_CLIENTE: num(r['Abonos Valor']), SALDO_CLIENTE: num(r.Saldo), TRANSPORTISTA_SYMPHONY: r.Trasnportista || '', ORIGEN: r.Origen || '', DESTINO: r.Destino || '', HUMAN_REVIEW: 'PENDIENTE', NOTAS: 'Cargado por WF-09' } });\n}\nconst outDet = det.filter(d => !detExistentes.has(d.ID_COMPRA)).map(d => ({ json: { destino: 'DETALLE', ...d } }));\nconst outProv = Object.entries(provLoc).filter(([k]) => !provExistentes.has(parseInt(k.split('|')[0]))).map(([k, v], i) => { const [id, nit] = k.split('|'); return { json: { destino: 'PROV_LOCAL', ID_CONTROL: 'PLP-' + Date.now().toString().slice(-6) + i, ID_COMPRA: parseInt(id), NIT_PROVEEDOR: nit, PROVEEDOR_NOMBRE: '', VALOR_COSTO: Math.round(v * 100) / 100, ESTADO_PAGO: 'PENDIENTE', HUMAN_REVIEW: 'PENDIENTE', NOTAS: 'Generado por WF-09' } }; });\nreturn [...outCab, ...outUpd, ...outDet, ...outProv];"
+      },
+      "id": "n5",
+      "name": "Aplanar + clasificar + upsert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.destino }}",
+                    "rightValue": "CABECERA",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "CAB"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.destino }}",
+                    "rightValue": "CABECERA_UPD",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "CAB_UPD"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.destino }}",
+                    "rightValue": "DETALLE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "DET"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.destino }}",
+                    "rightValue": "PROV_LOCAL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "PROV"
+            }
+          ]
+        }
+      },
+      "id": "n6",
+      "name": "Separar destinos",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        920,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPRAS_SYMPHONY"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "n7",
+      "name": "Append COMPRAS_SYMPHONY",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1160,
+        -100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPRAS_DETALLE"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "n8",
+      "name": "Append COMPRAS_DETALLE",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1160,
+        100
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "PROVEEDORES_LOCALES_PAGOS"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": {}
+      },
+      "id": "n9",
+      "name": "Append PROVEEDORES_LOCALES_PAGOS",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1160,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5559621779",
+        "text": "=📦 Compras Symphony cargadas: {{ $('Nuevo archivo de compras en Drive').first().json.name }}",
+        "additionalFields": {}
+      },
+      "id": "n10",
+      "name": "Confirmar carga",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        100
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPRAS_SYMPHONY"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ID_COMPRA"
+          ],
+          "value": {
+            "ID_COMPRA": "={{ $json.ID_COMPRA }}",
+            "ESTADO_SYMPHONY": "={{ $json.ESTADO_SYMPHONY }}",
+            "GESTION": "={{ $json.GESTION }}",
+            "COSTO_TRANSPORTE_SYMPHONY": "={{ $json.COSTO_TRANSPORTE_SYMPHONY }}",
+            "ABONOS_CLIENTE": "={{ $json.ABONOS_CLIENTE }}",
+            "SALDO_CLIENTE": "={{ $json.SALDO_CLIENTE }}",
+            "TRANSPORTISTA_SYMPHONY": "={{ $json.TRANSPORTISTA_SYMPHONY }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "n11",
+      "name": "Actualizar compras existentes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1160,
+        -300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "COMPRAS_DETALLE"
+        },
+        "options": {}
+      },
+      "id": "nld1",
+      "name": "Leer detalle ya cargado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        340
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1LgOCIMRXpyCQP9m9BYlHYjgykZ-otTXz-psuY0mRUdc"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "PROVEEDORES_LOCALES_PAGOS"
+        },
+        "options": {}
+      },
+      "id": "nlp1",
+      "name": "Leer proveedores ya generados",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        480
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GSHEETS",
+          "name": "Google Sheets MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "nw_det",
+      "name": "Esperar antes de cargar detalle",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        120
+      ],
+      "webhookId": "meup-wait-det"
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "nw_prov",
+      "name": "Esperar antes de cargar proveedores",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        260
+      ],
+      "webhookId": "meup-wait-prov"
+    }
+  ],
+  "connections": {
+    "Nuevo archivo de compras en Drive": {
+      "main": [
+        [
+          {
+            "node": "Descargar xlsx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar xlsx": {
+      "main": [
+        [
+          {
+            "node": "Leer hoja Compras",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer hoja Compras": {
+      "main": [
+        [
+          {
+            "node": "Leer compras ya cargadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer compras ya cargadas": {
+      "main": [
+        [
+          {
+            "node": "Leer detalle ya cargado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplanar + clasificar + upsert": {
+      "main": [
+        [
+          {
+            "node": "Separar destinos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar destinos": {
+      "main": [
+        [
+          {
+            "node": "Append COMPRAS_SYMPHONY",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actualizar compras existentes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar antes de cargar detalle",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar antes de cargar proveedores",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append COMPRAS_SYMPHONY": {
+      "main": [
+        [
+          {
+            "node": "Confirmar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append COMPRAS_DETALLE": {
+      "main": [
+        [
+          {
+            "node": "Confirmar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append PROVEEDORES_LOCALES_PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Confirmar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar compras existentes": {
+      "main": [
+        [
+          {
+            "node": "Confirmar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer detalle ya cargado": {
+      "main": [
+        [
+          {
+            "node": "Leer proveedores ya generados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer proveedores ya generados": {
+      "main": [
+        [
+          {
+            "node": "Aplanar + clasificar + upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar antes de cargar detalle": {
+      "main": [
+        [
+          {
+            "node": "Append COMPRAS_DETALLE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar antes de cargar proveedores": {
+      "main": [
+        [
+          {
+            "node": "Append PROVEEDORES_LOCALES_PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
