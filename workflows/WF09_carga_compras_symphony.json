@@ -303,7 +303,10 @@
       "parameters": {
         "chatId": "-5559621779",
         "text": "=📦 Compras Symphony cargadas: {{ $('Nuevo archivo de compras en Drive').first().json.name }}",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "n10",
       "name": "Confirmar carga",

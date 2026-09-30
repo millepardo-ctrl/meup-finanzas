@@ -129,7 +129,9 @@
         "chatId": "-5559621779",
         "text": "={{ $json.texto }}",
         "additionalFields": {
-          "parse_mode": "Markdown"
+          "parse_mode": "Markdown",
+          "parseMode": "None",
+          "appendAttribution": false
         }
       },
       "id": "n6",

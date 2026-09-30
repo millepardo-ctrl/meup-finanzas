@@ -252,7 +252,9 @@
         "chatId": "-5154074469",
         "text": "=🚛 *Solicitud de pago a transportista*\\n{{ $json.ID_SOLICITUD }} · Compra {{ $json.ID_COMPRA }}\\n{{ $json.TRANSPORTISTA }} (CC {{ $json.CEDULA }})\\nValor bruto: ${{ $json.VALOR_SOLICITADO }} ({{ $json.TIPO }})\\n💰 *PAGAR NETO: ${{ $json.PAGO_NETO }}* (retefuente ${{ $json.RETENCION }})\\nMedio: {{ $json.MEDIO_PAGO }} → {{ $json.TELEFONO }}\\nCta cobro {{ $json.CUENTA_COBRO }} · Rem {{ $json.REMISION }}\\n{{ $json.NOTAS.startsWith('⚠️') ? $json.NOTAS.split(' | Texto:')[0] : '' }}",
         "additionalFields": {
-          "parse_mode": "Markdown"
+          "parse_mode": "Markdown",
+          "parseMode": "None",
+          "appendAttribution": false
         }
       },
       "id": "n8",
@@ -274,7 +276,10 @@
       "parameters": {
         "chatId": "-5154074469",
         "text": "=⚠️ Solicitud {{ $json.ESTADO }}\\n{{ $json.ID_SOLICITUD }} · {{ $json.TRANSPORTISTA }}\\n{{ $json.NOTAS }}",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "n9",
       "name": "Alerta duplicado / revisar",

@@ -421,7 +421,10 @@
       "parameters": {
         "chatId": "-5154074469",
         "text": "=✅ Comprobante {{ $('Vincular ID de compra al último comprobante').first().json.ID_DOC }} vinculado a la compra {{ $('Vincular ID de compra al último comprobante').first().json.id_compra }}",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "nr5",
       "name": "Confirmar vínculo",
@@ -442,7 +445,10 @@
       "parameters": {
         "chatId": "-5154074469",
         "text": "=⚠️ {{ $json.aviso }} Reenvíen primero el comprobante y luego el texto con la ID.",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "nr6",
       "name": "Aviso sin comprobante",

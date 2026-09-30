@@ -156,7 +156,10 @@
       "parameters": {
         "chatId": "-5559621779",
         "text": "=✅ Extracto cargado: {{ $('Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)').first().json.name }} → {{ $('Normalizar a esquema BANCOS_MOV').all().length }} movimientos en BANCOS_MOV.",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "n7",
       "name": "Confirmar por Telegram",

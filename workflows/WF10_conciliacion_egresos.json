@@ -377,7 +377,9 @@
         "chatId": "-5559621779",
         "text": "=✅ *Egreso conciliado*\\n{{ $('¿Match?').item.json.doc.ID_DOC }} · {{ $('¿Match?').item.json.doc.CATEGORIA_GASTO || 'GASTO_GENERAL' }}\\n${{ $('¿Match?').item.json.valor }} → {{ $('¿Match?').item.json.mov.CUENTA }}\\n{{ $('¿Match?').item.json.provLocal ? 'Compra local ' + $('¿Match?').item.json.provLocal.ID_COMPRA + ' marcada ' + ($('¿Match?').item.json.esAbonoProveedor ? 'ABONADA' : 'PAGADA') : '' }}",
         "additionalFields": {
-          "parse_mode": "Markdown"
+          "parse_mode": "Markdown",
+          "parseMode": "None",
+          "appendAttribution": false
         }
       },
       "id": "n12",
@@ -440,7 +442,10 @@
       "parameters": {
         "chatId": "-5559621779",
         "text": "=⚠️ Egreso sin conciliar\\n{{ $json.doc.ID_DOC }} · ${{ $json.doc.OCR_VALOR }} · {{ $json.doc.CATEGORIA_GASTO }}\\n{{ $json.motivo }}\\n{{ $json.doc.URL_DRIVE }}\\n(Si el extracto aún no se ha subido, se reintentará solo.)",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "n14",
       "name": "Alertar problema",

@@ -272,7 +272,10 @@
       "parameters": {
         "chatId": "-5363971034",
         "text": "=⚠️ Comprobante sin conciliar\\nID: {{ $json.ID_DOC }}\\nCliente OCR: {{ $json.OCR_CLIENTE }}\\nValor: ${{ $json.OCR_VALOR }}\\nMotivo: {{ $json.motivo || $json.candidatos }}\\nDrive: {{ $json.URL_DRIVE }}",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "n9",
       "name": "Alerta Telegram",

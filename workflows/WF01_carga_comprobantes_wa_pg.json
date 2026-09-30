@@ -445,7 +445,10 @@
       "parameters": {
         "chatId": "={{ $('Clasificar mensaje (grupo + contenido)').first().json.grupo === 'CONTABILIDAD' ? '-5559621779' : '-5363971034' }}",
         "text": "=✅ Comprobante {{ $('Vincular ID al último comprobante').first().json.ID_DOC }} vinculado a la ID {{ $('Vincular ID al último comprobante').first().json.id_compra }}",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "nr5",
       "name": "Confirmar vínculo",
@@ -466,7 +469,10 @@
       "parameters": {
         "chatId": "={{ $('Clasificar mensaje (grupo + contenido)').first().json.grupo === 'CONTABILIDAD' ? '-5559621779' : '-5363971034' }}",
         "text": "=⚠️ {{ $json.aviso }} Envíen primero el comprobante y luego el texto con la ID.",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "nr6",
       "name": "Aviso sin comprobante",
@@ -530,7 +536,10 @@
       "parameters": {
         "chatId": "={{ {'PAGOS':'-5363971034','LOGISTICA':'-5154074469','CONTABILIDAD':'-5559621779'}[$('Clasificar mensaje (grupo + contenido)').first().json.grupo] }}",
         "text": "={{ $('Detectar copia de soporte').first().json.es_copia ? '🗂 Soporte archivado como copia (original ' + $('Detectar copia de soporte').first().json.original + ' ya procesado)' : '📥 Registrado ' + $('Detectar copia de soporte').first().json.ID_DOC + ' · ' + $('Detectar copia de soporte').first().json.CLASIFICACION + ($('Detectar copia de soporte').first().json.OCR_VALOR ? ' · $' + $('Detectar copia de soporte').first().json.OCR_VALOR : '') + ($('Detectar copia de soporte').first().json.CATEGORIA_GASTO ? ' · ' + $('Detectar copia de soporte').first().json.CATEGORIA_GASTO : '') + ($('Detectar copia de soporte').first().json.ID_COMPRA_INFORMADO ? ' · ID ' + $('Detectar copia de soporte').first().json.ID_COMPRA_INFORMADO : '') + ($('Detectar copia de soporte').first().json.OCR_ESTADO === 'REVISAR' ? ' ⚠️ revisar' : '') }}",
-        "additionalFields": {}
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
       },
       "id": "nc1",
       "name": "Confirmar recepción al grupo",
