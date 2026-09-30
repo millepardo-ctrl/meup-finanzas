@@ -1,0 +1,859 @@
+{
+  "name": "WF-01 · Router Telegram 3 grupos + COMPROBANTES_WA (Postgres)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {
+          "download": true,
+          "imageSize": "large"
+        }
+      },
+      "id": "n1",
+      "name": "Telegram Trigger (los 3 grupos)",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json.message;\nif (!msg) return [];\nif (msg.from?.is_bot) return []; // CRÍTICO: ignorar los mensajes del propio bot (evita bucles de confirmaciones)\nconst GRUPOS = {\n  '-5363971034': 'PAGOS',\n  '-5154074469': 'LOGISTICA',\n  '-5559621779': 'CONTABILIDAD'\n};\nconst chat = String(msg.chat?.id || '');\nconst grupo = GRUPOS[chat] || 'DESCONOCIDO';\nif (grupo === 'DESCONOCIDO') return [];\nconst foto = msg.photo && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;\nconst docu = msg.document || null;\nconst media = foto || docu;\nconst texto = msg.text || msg.caption || '';\nconst t = texto.toUpperCase();\n// ===== Detección de SOLICITUD (solo grupo LOGISTICA) por MARCADORES ESTRUCTURALES =====\n// El lenguaje real es variado: \"hacer anticipo\", \"abonar\", \"consignar\"... Los verbos no bastan.\n// Contamos marcadores del formato de solicitud; con 2+ es solicitud, o con 1 + verbo de pago.\nlet esSolicitud = false;\nif (grupo === 'LOGISTICA' && !media) {\n  const marcadores = [/CUENTA DE COBRO/, /REMISI[OÓ]N/, /C\\.?C\\.?\\s*\\d|C[EÉ]DULA/, /COSTO\\s*[=:]?\\s*[\\d.]/, /TEL[EÉ]FONO|CEL\\b/, /NEQUI|DAVIPLATA|BANCOLOMBIA|DAVIVIENDA|AHORRO|CORRIENTE/]\n    .filter(rx => rx.test(t)).length;\n  const verbo = /PAG(O|AR)|ANTICIPO|ABON(O|AR)|CONSIGN|TRANSFER|GIR(O|AR)/.test(t);\n  esSolicitud = marcadores >= 2 || (marcadores >= 1 && verbo);\n}\n// ===== Referencia de ID (Pagos y Contabilidad): la REMISIÓN también es el ID de la compra =====\nlet idCompraRef = null;\nif (!media && !esSolicitud && grupo !== 'LOGISTICA') {\n  const m = t.match(/\\b(?:ID|COMPRA|COTIZACION|COTIZACIÓN|OC|REMISION|REMISIÓN)\\s*[:#=.]?\\s*(\\d{4,6})\\b/) || t.match(/^\\s*(\\d{4,6})\\s*$/);\n  if (m) idCompraRef = parseInt(m[1]);\n}\nconst mime = docu ? (docu.mime_type || 'application/octet-stream') : (foto ? 'image/jpeg' : null);\nreturn [{ json: {\n  ruta: media ? 'COMPROBANTE' : (esSolicitud ? 'SOLICITUD_TRANSPORTE' : (idCompraRef ? 'REFERENCIA_ID' : 'IGNORAR')),\n  grupo,\n  id_compra_ref: idCompraRef,\n  mes: new Date(msg.date * 1000).toISOString().slice(0, 7),\n  wa_from: String(msg.from?.id || ''),\n  wa_name: [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || (msg.from?.username || ''),\n  wa_msg_id: String(msg.message_id),\n  wa_timestamp: new Date(msg.date * 1000).toISOString(),\n  texto,\n  file_id: media ? media.file_id : null,\n  mime_type: mime,\n  filename: (docu && docu.file_name) ? docu.file_name : (media ? 'comprobante_' + msg.message_id + (mime === 'application/pdf' ? '.pdf' : '.jpg') : null)\n}}];"
+      },
+      "id": "n2",
+      "name": "Clasificar mensaje (grupo + contenido)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "COMPROBANTE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "COMPROBANTE"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "SOLICITUD_TRANSPORTE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "SOLICITUD"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "REFERENCIA_ID",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "REFERENCIA"
+            }
+          ]
+        }
+      },
+      "id": "n3",
+      "name": "Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $json.file_id }}",
+        "additionalFields": {}
+      },
+      "id": "n4",
+      "name": "Descargar archivo (Telegram getFile)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        -200
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "=name = '{{ $('Clasificar mensaje (grupo + contenido)').first().json.mes }}' and '{{ '1b1EQ6MBkrmelxDnDDjFJlWpjq3J5U6-I' }}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+        "returnAll": false,
+        "limit": 1,
+        "options": {}
+      },
+      "id": "n5a",
+      "name": "Buscar carpeta del mes",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        880,
+        -320
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Si la carpeta AAAA-MM existe, usar su id; si no, señal para crearla\nconst items = $input.all().filter(i => i.json && i.json.id);\nif (items.length > 0) return [{ json: { carpeta_id: items[0].json.id, crear: false } }];\nreturn [{ json: { crear: true, mes: $('Clasificar mensaje (grupo + contenido)').first().json.mes } }];"
+      },
+      "id": "n5b",
+      "name": "Resolver carpeta del mes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -320
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.crear }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "id": "n5c",
+      "name": "¿Crear carpeta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $json.mes }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1b1EQ6MBkrmelxDnDDjFJlWpjq3J5U6-I"
+        },
+        "options": {}
+      },
+      "id": "n5d",
+      "name": "Crear carpeta del mes",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1320,
+        -420
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "={{ $('Clasificar mensaje (grupo + contenido)').first().json.wa_timestamp.slice(0,10) }}_{{ $('Clasificar mensaje (grupo + contenido)').first().json.grupo }}_{{ $('Clasificar mensaje (grupo + contenido)').first().json.wa_name.replace(/[^a-zA-Z0-9]/g,'') }}_{{ $('Clasificar mensaje (grupo + contenido)').first().json.filename }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.folder_id }}"
+        },
+        "options": {}
+      },
+      "id": "n6",
+      "name": "Subir a Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1760,
+        -320
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// El binario viene del nodo de descarga (rama directa)\nconst b64 = Buffer.from(await this.helpers.getBinaryDataBuffer(0, 'data')).toString('base64');\nlet mime = $('Clasificar mensaje (grupo + contenido)').first().json.mime_type || 'image/jpeg';\nif (!['image/jpeg','image/png','image/gif','image/webp','application/pdf'].includes(mime)) mime = 'image/jpeg';\nconst isPdf = mime === 'application/pdf';\nconst grupo = $('Clasificar mensaje (grupo + contenido)').first().json.grupo;\nconst block = isPdf\n  ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }\n  : { type: 'image', source: { type: 'base64', media_type: mime, data: b64 } };\nconst prompt = `Eres el sistema OCR contable de MeUp (Colombia). Este documento llegó al grupo interno \\\"${grupo}\\\" (PAGOS = abonos de clientes a MeUp; LOGISTICA = pagos de MeUp a transportistas; CONTABILIDAD = egresos, gastos, facturas de compra y órdenes de compra de MeUp). Analiza y responde SOLO con JSON válido, sin markdown:\\n{\\n \\\"tipo_documento\\\": \\\"COMPROBANTE_TRANSFERENCIA|ORDEN_COMPRA|FACTURA|OTRO\\\",\\n \\\"clasificacion\\\": \\\"COMPROBANTE_PAGO|FACTURA|EXTRACTO|OTRO\\\",\\n \\\"fecha_pago\\\": \\\"YYYY-MM-DD o null\\\",\\n \\\"valor\\\": numero o null,\\n \\\"moneda\\\": \\\"COP|USD\\\",\\n \\\"banco_origen\\\": \\\"string o null\\\",\\n \\\"banco_destino\\\": \\\"string o null\\\",\\n \\\"medio\\\": \\\"NEQUI|DAVIPLATA|BANCOLOMBIA|PSE|OTRO\\\",\\n \\\"referencia\\\": \\\"string o null\\\",\\n \\\"nombre_pagador\\\": \\\"string o null\\\",\\n \\\"nombre_destinatario\\\": \\\"string o null\\\",\\n \\\"telefono_destino\\\": \\\"string o null\\\",\\n \\\"destino_es_meup\\\": true|false|null,\\n \\\"origen_es_meup\\\": true|false|null,\\n \\\"oc_numero\\\": \\\"string o null (número de orden de compra / pedido, suele coincidir con el ID de Symphony)\\\",\\n \\\"categoria_gasto\\\": \\\"ARRIENDO|NOMINA|VIATICOS|IMPUESTOS|SERVICIOS|TRANSPORTE|IMPORTACION|GIRO_INTERNACIONAL|COMPRA_PROVEEDOR|GASTO_GENERAL|null\\\",\\n \\\"confianza\\\": \\\"ALTA|MEDIA|BAJA\\\",\\n \\\"observaciones\\\": \\\"string\\\"\\n}\\nIDENTIFICADORES DE MEUP: nombre contiene MEUP o ME UP; NIT 900570024; cuentas Bancolombia corriente 3762, Bancolombia ahorros 8985, Davivienda ahorros 4335, Davivienda corriente 6614, Banco Agrario 9030, Bancolombia Panamá 3826.\\nREGLAS: destino_es_meup=true si el beneficiario es MeUp. Un cliente pagando a MeUp muestra dinero saliendo de SU cuenta hacia MeUp: destino_es_meup=true. punto = separador de miles (700.000 = 700000). categoria_gasto solo aplica a egresos de MeUp; para pagos de clientes déjala null. Si el documento es una ORDEN DE COMPRA (pedido a proveedor, sin transferencia), tipo_documento=ORDEN_COMPRA y extrae oc_numero y nombre del proveedor en nombre_destinatario.`;\nreturn [{ json: { anthropic_body: {\n  model: 'claude-sonnet-4-6', max_tokens: 1024,\n  messages: [{ role: 'user', content: [ block, { type: 'text', text: prompt } ] }]\n}}}];"
+      },
+      "id": "n7",
+      "name": "Preparar petición OCR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.anthropic_body) }}",
+        "options": {}
+      },
+      "id": "n8",
+      "name": "OCR con Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        -120
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REEMPLAZAR_CRED_ANTHROPIC",
+          "name": "Anthropic x-api-key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let p = { clasificacion: 'OTRO', tipo_documento: 'OTRO', confianza: 'BAJA', observaciones: 'Error de parseo OCR' };\ntry {\n  const raw = $json.content.filter(b => b.type === 'text').map(b => b.text).join('');\n  p = JSON.parse(raw.replace(/```json|```/g, '').trim());\n} catch (e) {}\nconst meta = $('Clasificar mensaje (grupo + contenido)').first().json;\nlet drive = {};\ntry { drive = $('Subir a Google Drive').first().json || {}; } catch (e) { /* la subida a Drive falló o no corrió: registrar igual */ }\nconst cap = (meta.texto || '').toUpperCase();\n// ===== Clasificación: el GRUPO manda; el flujo de dinero afina =====\nlet clasif;\nif (p.tipo_documento === 'ORDEN_COMPRA') {\n  clasif = 'ORDEN_COMPRA';\n} else if (meta.grupo === 'PAGOS') {\n  // En Pagos solo llegan abonos de clientes; el OCR solo puede corregir si es clarísimo que MeUp es el pagador\n  clasif = (p.origen_es_meup === true && p.destino_es_meup !== true) ? 'COMPROBANTE_EGRESO' : 'COMPROBANTE_PAGO';\n} else if (meta.grupo === 'LOGISTICA') {\n  clasif = 'COMPROBANTE_EGRESO';\n} else { // CONTABILIDAD: aquí no llegan pagos de clientes\n  clasif = (p.destino_es_meup === true) ? 'COMPROBANTE_PAGO' : 'COMPROBANTE_EGRESO';\n}\nconst esEgreso = clasif === 'COMPROBANTE_EGRESO';\nconst estado = clasif === 'ORDEN_COMPRA' ? 'ARCHIVO' : ((p.clasificacion === 'COMPROBANTE_PAGO' || p.tipo_documento === 'COMPROBANTE_TRANSFERENCIA') ? 'PROCESADO' : 'REVISAR');\nreturn [{ json: {\n  ID_DOC: 'WA-' + Date.now().toString().slice(-9),\n  FECHA_RECIBIDO: meta.wa_timestamp.replace('T',' ').slice(0,16),\n  REMITENTE_WA: 'tg:' + meta.wa_from,\n  NOMBRE_CONTACTO: meta.wa_name,\n  TIPO_ARCHIVO: meta.mime_type,\n  URL_DRIVE: drive.webViewLink || (drive.id ? 'https://drive.google.com/file/d/' + drive.id : 'SIN_URL_REVISAR'),\n  OCR_ESTADO: p.confianza === 'BAJA' ? 'REVISAR' : 'OK',\n  OCR_FECHA_PAGO: p.fecha_pago || '',\n  OCR_VALOR: p.valor || '',\n  OCR_BANCO_ORIGEN: p.banco_origen || '',\n  OCR_BANCO_DESTINO: (p.banco_destino || p.medio || ''),\n  OCR_REFERENCIA: [p.referencia, p.telefono_destino].filter(Boolean).join(' | '),\n  OCR_CLIENTE: esEgreso || clasif === 'ORDEN_COMPRA' ? (p.nombre_destinatario || '') : (p.nombre_pagador || ''),\n  OCR_CONFIANZA: p.confianza,\n  CLASIFICACION: clasif,\n  ID_MOV_MATCH: '',\n  ESTADO: estado,\n  RECIBO_SIIGO: '',\n  NOTAS: (p.observaciones || '') + (meta.texto ? ' | Caption: ' + meta.texto : ''),\n  HUMAN_REVIEW: 'PENDIENTE',\n  ID_COMPRA_INFORMADO: (function(){\n    if (p.oc_numero) return String(p.oc_numero).replace(/\\D/g,'');\n    const m = (meta.texto || '').toUpperCase().match(/\\b(?:ID|COMPRA|COTIZACION|COTIZACIÓN|OC|REMISION|REMISIÓN)\\s*[:#=.]?\\s*(\\d{4,6})\\b/);\n    return m ? m[1] : '';\n  })(),\n  GRUPO_ORIGEN: meta.grupo,\n  CATEGORIA_GASTO: esEgreso || clasif === 'ORDEN_COMPRA' ? (p.categoria_gasto || (meta.grupo === 'LOGISTICA' ? 'TRANSPORTE' : '')) : '',\n  OC_NUM: p.oc_numero || ''\n}}];"
+      },
+      "id": "n9",
+      "name": "Parsear resultado OCR",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into comprobantes_wa (\n  id_doc, fecha_recibido, remitente_wa, nombre_contacto, tipo_archivo, url_drive,\n  ocr_estado, ocr_fecha_pago, ocr_valor, ocr_banco_origen, ocr_banco_destino,\n  ocr_referencia, ocr_cliente, ocr_confianza, clasificacion, id_mov_match,\n  estado, recibo_siigo, notas, human_review, id_compra_informado, grupo_origen,\n  categoria_gasto, oc_num\n) values (\n  $1, $2::timestamptz, $3, $4, $5, $6,\n  $7, nullif($8,'')::date, nullif($9,'')::numeric, $10, $11,\n  $12, $13, nullif($14,'')::numeric, $15, nullif($16,''),\n  $17, nullif($18,''), $19, $20, nullif($21,''), $22,\n  nullif($23,''), nullif($24,'')\n)\non conflict (id_doc) do nothing;",
+        "options": {
+          "queryReplacement": "={{ [$json.ID_DOC, $json.FECHA_RECIBIDO, $json.REMITENTE_WA, $json.NOMBRE_CONTACTO, $json.TIPO_ARCHIVO, $json.URL_DRIVE, $json.OCR_ESTADO, $json.OCR_FECHA_PAGO, $json.OCR_VALOR, $json.OCR_BANCO_ORIGEN, $json.OCR_BANCO_DESTINO, $json.OCR_REFERENCIA, $json.OCR_CLIENTE, $json.OCR_CONFIANZA, $json.CLASIFICACION, $json.ID_MOV_MATCH, $json.ESTADO, $json.RECIBO_SIIGO, $json.NOTAS, $json.HUMAN_REVIEW, $json.ID_COMPRA_INFORMADO, $json.GRUPO_ORIGEN, $json.CATEGORIA_GASTO, $json.OC_NUM] }}"
+        }
+      },
+      "id": "n10",
+      "name": "Registrar en COMPROBANTES_WA",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1980,
+        -120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REEMPLAZAR_ID_WORKFLOW_WF07"
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "n11",
+      "name": "Enviar a WF-07 (solicitud transporte)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_doc, remitente_wa, grupo_origen, fecha_recibido, notas\nfrom comprobantes_wa\nwhere fecha_recibido >= now() - interval '2 hours'\norder by fecha_recibido desc;",
+        "options": {}
+      },
+      "id": "nr1",
+      "name": "Leer comprobantes recientes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        660,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const meta = $('Clasificar mensaje (grupo + contenido)').first().json;\nconst filas = $('Leer comprobantes recientes').all().map(i => i.json);\nconst remitente = 'tg:' + meta.wa_from;\nconst ahora = new Date(meta.wa_timestamp).getTime();\nconst candidatas = filas\n  .filter(f => f.remitente_wa === remitente && f.fecha_recibido && f.grupo_origen === meta.grupo)\n  .map(f => ({ f, ts: new Date(f.fecha_recibido).getTime() }))\n  .filter(x => !isNaN(x.ts) && (ahora - x.ts) >= 0 && (ahora - x.ts) <= 60 * 60 * 1000)\n  .sort((a, b) => b.ts - a.ts);\nif (candidatas.length === 0) {\n  return [{ json: { encontrado: false, id_compra: meta.id_compra_ref, aviso: 'Llegó la referencia ' + meta.id_compra_ref + ' pero no hay comprobante de ' + (meta.wa_name || remitente) + ' en la última hora en este grupo.' } }];\n}\nconst c = candidatas[0].f;\nreturn [{ json: { encontrado: true, ID_DOC: c.id_doc, id_compra: meta.id_compra_ref,\n  notas_nuevas: ((c.notas || '') + ' | ID informada por asesor: ' + meta.id_compra_ref).slice(0, 500) } }];"
+      },
+      "id": "nr2",
+      "name": "Vincular ID al último comprobante",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.encontrado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        }
+      },
+      "id": "nr3",
+      "name": "¿Comprobante encontrado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa\nset id_compra_informado = $2, notas = $3, updated_at = now()\nwhere id_doc = $1;",
+        "options": {
+          "queryReplacement": "={{ [$json.ID_DOC, $json.id_compra, $json.notas_nuevas] }}"
+        }
+      },
+      "id": "nr4",
+      "name": "Guardar ID en el comprobante",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1320,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Clasificar mensaje (grupo + contenido)').first().json.grupo === 'CONTABILIDAD' ? '-5559621779' : '-5363971034' }}",
+        "text": "=✅ Comprobante {{ $('Vincular ID al último comprobante').first().json.ID_DOC }} vinculado a la ID {{ $('Vincular ID al último comprobante').first().json.id_compra }}",
+        "additionalFields": {}
+      },
+      "id": "nr5",
+      "name": "Confirmar vínculo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        240
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Clasificar mensaje (grupo + contenido)').first().json.grupo === 'CONTABILIDAD' ? '-5559621779' : '-5363971034' }}",
+        "text": "=⚠️ {{ $json.aviso }} Envíen primero el comprobante y luego el texto con la ID.",
+        "additionalFields": {}
+      },
+      "id": "nr6",
+      "name": "Aviso sin comprobante",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1320,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## WF-01 v4 · 3 grupos de Telegram\nEl GRUPO clasifica:\n· PAGOS → comprobantes de clientes (COMPROBANTE_PAGO)\n· LOGISTICA → solicitudes (texto → WF-07) y comprobantes de egreso a transportistas\n· CONTABILIDAD → egresos/gastos con CATEGORIA_GASTO, facturas y ÓRDENES DE COMPRA (tipo ORDEN_COMPRA, estado ARCHIVO)\n\nLos archivos se guardan en carpetas mensuales AAAA-MM (se crean solas).\n\n⚠️ ANTES DE ACTIVAR:\n1. Agregar el bot a los 3 grupos (privacy mode Disable en @BotFather).\n2. Reemplazar los 3 chat_id en el nodo 'Clasificar mensaje' Y en los 2 nodos de confirmación.\n3. Agregar encabezados en COMPROBANTES_WA: V1=GRUPO_ORIGEN, W1=CATEGORIA_GASTO, X1=OC_NUM (U1=ID_COMPRA_INFORMADO ya existe).\n4. Pegar el ID de WF-07 en su nodo.\nREEMPLAZA a WF-01 v3.",
+        "height": 420,
+        "width": 460
+      },
+      "id": "note1",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta el ARCHIVO (binario de la descarga de Telegram) con la CARPETA del mes resuelta/creada\nconst bin = $('Descargar archivo (Telegram getFile)').first().binary;\nif (!bin || !bin.data) throw new Error('No llegó el binario desde la descarga de Telegram');\nconst folderId = $json.carpeta_id || $json.id;\nif (!folderId) throw new Error('No se resolvió la carpeta del mes');\nreturn [{ json: { folder_id: folderId }, binary: bin }];"
+      },
+      "id": "n5e",
+      "name": "Adjuntar binario y carpeta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 25,
+        "unit": "seconds"
+      },
+      "id": "nw1",
+      "name": "Esperar procesamiento del comprobante",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        560,
+        320
+      ],
+      "webhookId": "meup-wait-ref"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ {'PAGOS':'-5363971034','LOGISTICA':'-5154074469','CONTABILIDAD':'-5559621779'}[$('Clasificar mensaje (grupo + contenido)').first().json.grupo] }}",
+        "text": "={{ $('Detectar copia de soporte').first().json.es_copia ? '🗂 Soporte archivado como copia (original ' + $('Detectar copia de soporte').first().json.original + ' ya procesado)' : '📥 Registrado ' + $('Detectar copia de soporte').first().json.ID_DOC + ' · ' + $('Detectar copia de soporte').first().json.CLASIFICACION + ($('Detectar copia de soporte').first().json.OCR_VALOR ? ' · $' + $('Detectar copia de soporte').first().json.OCR_VALOR : '') + ($('Detectar copia de soporte').first().json.CATEGORIA_GASTO ? ' · ' + $('Detectar copia de soporte').first().json.CATEGORIA_GASTO : '') + ($('Detectar copia de soporte').first().json.ID_COMPRA_INFORMADO ? ' · ID ' + $('Detectar copia de soporte').first().json.ID_COMPRA_INFORMADO : '') + ($('Detectar copia de soporte').first().json.OCR_ESTADO === 'REVISAR' ? ' ⚠️ revisar' : '') }}",
+        "additionalFields": {}
+      },
+      "id": "nc1",
+      "name": "Confirmar recepción al grupo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2200,
+        -120
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_doc, grupo_origen, ocr_referencia, ocr_valor, ocr_fecha_pago, ocr_cliente, id_mov_match\nfrom comprobantes_wa\nwhere fecha_recibido >= now() - interval '90 days';",
+        "options": {}
+      },
+      "id": "nd1",
+      "name": "Leer comprobantes (antiduplicado)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1540,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// El MISMO soporte llega a dos grupos (ej: pago a transportista → Logística Y Contabilidad).\n// Si ya existe un comprobante con la misma referencia bancaria (o valor+fecha+beneficiario),\n// la nueva llegada se archiva como COPIA_SOPORTE: se guarda en Drive y en Postgres, pero\n// ningún motor (WF-02/08/10) la procesa — evita cruces dobles y falsas alarmas de duplicado.\nconst fila = { ...$('Parsear resultado OCR').first().json };\nlet existentes = [];\ntry { existentes = $('Leer comprobantes (antiduplicado)').all().map(i => i.json).filter(f => f.id_doc); } catch (e) {}\nconst norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim();\nconst refNueva = norm(fila.OCR_REFERENCIA);\nconst dup = existentes.find(f => {\n  if (f.id_doc === fila.ID_DOC) return false;\n  // Coincidencia fuerte: misma referencia bancaria (no vacía, >5 caracteres)\n  if (refNueva && refNueva.length > 5 && norm(f.ocr_referencia) === refNueva) return true;\n  // Coincidencia por valor + fecha + beneficiario/cliente\n  const mismoValor = String(f.ocr_valor) === String(fila.OCR_VALOR) && fila.OCR_VALOR;\n  const mismaFecha = f.ocr_fecha_pago && String(f.ocr_fecha_pago).slice(0,10) === String(fila.OCR_FECHA_PAGO).slice(0,10);\n  const mismoNombre = norm(f.ocr_cliente) && norm(f.ocr_cliente) === norm(fila.OCR_CLIENTE);\n  return mismoValor && mismaFecha && mismoNombre;\n});\nif (dup) {\n  fila.ESTADO = 'COPIA_SOPORTE';\n  fila.ID_MOV_MATCH = dup.id_mov_match || '';\n  fila.NOTAS = ('Copia del soporte ' + dup.id_doc + ' (' + (dup.grupo_origen || '?') + ') | ' + (fila.NOTAS || '')).slice(0, 500);\n  fila.es_copia = true; fila.original = dup.id_doc;\n}\nreturn [{ json: fila }];"
+      },
+      "id": "nd2",
+      "name": "Detectar copia de soporte",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Migración a Postgres (WF-01)\n\nSolo se migraron los 4 nodos que leían/escribían COMPROBANTES_WA en Sheets:\n- **Registrar en COMPROBANTES_WA**: append → insert con `on conflict (id_doc) do nothing`\n- **Leer comprobantes recientes** / **Leer comprobantes (antiduplicado)**: ahora filtran por\n  fecha en el propio SQL (2h y 90 días respectivamente) en vez de traer todo el histórico\n- **Guardar ID en el comprobante**: update por `id_doc`\n\nEl almacenamiento sigue en Google Drive (Fase 5 = Dropbox, aún no).\nLos Code nodes que leían filas de Sheets ahora leen columnas Postgres en minúscula\n(`f.id_doc`, `f.ocr_referencia`, ...) — la fila que se inserta sigue usando las\nclaves MAYÚSCULA del Code node 'Parsear resultado OCR', sin tocar esa lógica.\n\nCredenciales a reasignar tras importar: Postgres (`Supabase MeUp Finanzas`) en los\n4 nodos nuevos; Telegram y Google Drive quedan igual que en la versión Sheets.",
+        "height": 420,
+        "width": 420
+      },
+      "id": "note-pg-migration",
+      "name": "Nota migración Postgres",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        -420
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger (los 3 grupos)": {
+      "main": [
+        [
+          {
+            "node": "Clasificar mensaje (grupo + contenido)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar mensaje (grupo + contenido)": {
+      "main": [
+        [
+          {
+            "node": "Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router": {
+      "main": [
+        [
+          {
+            "node": "Descargar archivo (Telegram getFile)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar a WF-07 (solicitud transporte)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Esperar procesamiento del comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar archivo (Telegram getFile)": {
+      "main": [
+        [
+          {
+            "node": "Buscar carpeta del mes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Preparar petición OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar carpeta del mes": {
+      "main": [
+        [
+          {
+            "node": "Resolver carpeta del mes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver carpeta del mes": {
+      "main": [
+        [
+          {
+            "node": "¿Crear carpeta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Crear carpeta?": {
+      "main": [
+        [
+          {
+            "node": "Crear carpeta del mes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Adjuntar binario y carpeta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear carpeta del mes": {
+      "main": [
+        [
+          {
+            "node": "Adjuntar binario y carpeta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar petición OCR": {
+      "main": [
+        [
+          {
+            "node": "OCR con Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OCR con Claude": {
+      "main": [
+        [
+          {
+            "node": "Parsear resultado OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear resultado OCR": {
+      "main": [
+        [
+          {
+            "node": "Leer comprobantes (antiduplicado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer comprobantes recientes": {
+      "main": [
+        [
+          {
+            "node": "Vincular ID al último comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vincular ID al último comprobante": {
+      "main": [
+        [
+          {
+            "node": "¿Comprobante encontrado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Comprobante encontrado?": {
+      "main": [
+        [
+          {
+            "node": "Guardar ID en el comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aviso sin comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar ID en el comprobante": {
+      "main": [
+        [
+          {
+            "node": "Confirmar vínculo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adjuntar binario y carpeta": {
+      "main": [
+        [
+          {
+            "node": "Subir a Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar procesamiento del comprobante": {
+      "main": [
+        [
+          {
+            "node": "Leer comprobantes recientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar en COMPROBANTES_WA": {
+      "main": [
+        [
+          {
+            "node": "Confirmar recepción al grupo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer comprobantes (antiduplicado)": {
+      "main": [
+        [
+          {
+            "node": "Detectar copia de soporte",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar copia de soporte": {
+      "main": [
+        [
+          {
+            "node": "Registrar en COMPROBANTES_WA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
