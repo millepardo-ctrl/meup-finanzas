@@ -203,6 +203,30 @@
     {
       "parameters": {
         "operation": "executeQuery",
+        "query": "insert into cat_terceros (nit, nombre, tipo)\nvalues ($1, 'PROVEEDOR LOCAL ' || $1, 'PROVEEDOR_LOCAL')\non conflict (nit) do nothing;",
+        "options": {
+          "queryReplacement": "={{ [$json.nit_proveedor] }}"
+        }
+      },
+      "id": "n9b",
+      "name": "Sembrar CAT_TERCEROS (stub si es nuevo)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1160,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
         "query": "insert into proveedores_locales_pagos (id_control, id_compra, nit_proveedor, valor_costo, estado_pago, human_review, notas)\nvalues ('PLP-' || $1 || '-' || $2, $1, $2, $3, 'PENDIENTE', 'PENDIENTE', 'Generado por WF-09')\non conflict (id_compra, nit_proveedor) do update set\n  valor_costo = excluded.valor_costo,\n  updated_at = now();",
         "options": {
           "queryReplacement": "={{ [$json.id_compra, $json.nit_proveedor, $json.valor_costo] }}"
@@ -213,8 +237,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        1160,
-        200
+        1400,
+        340
       ],
       "credentials": {
         "postgres": {
@@ -324,7 +348,7 @@
         ],
         [
           {
-            "node": "Upsert PROVEEDORES_LOCALES_PAGOS",
+            "node": "Sembrar CAT_TERCEROS (stub si es nuevo)",
             "type": "main",
             "index": 0
           }
@@ -358,6 +382,17 @@
         [
           {
             "node": "Confirmar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sembrar CAT_TERCEROS (stub si es nuevo)": {
+      "main": [
+        [
+          {
+            "node": "Upsert PROVEEDORES_LOCALES_PAGOS",
             "type": "main",
             "index": 0
           }
