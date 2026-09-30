@@ -317,7 +317,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "insert into comprobantes_wa (\n  id_doc, fecha_recibido, remitente_wa, nombre_contacto, tipo_archivo, url_drive,\n  ocr_estado, ocr_fecha_pago, ocr_valor, ocr_banco_origen, ocr_banco_destino,\n  ocr_referencia, ocr_cliente, ocr_confianza, clasificacion, id_mov_match,\n  estado, recibo_siigo, notas, human_review, id_compra_informado, grupo_origen,\n  categoria_gasto, oc_num\n) values (\n  $1, $2::timestamptz, $3, $4, $5, $6,\n  $7, nullif($8,'')::date, nullif($9,'')::numeric, $10, $11,\n  $12, $13, nullif($14,'')::numeric, $15, nullif($16,''),\n  $17, nullif($18,''), $19, $20, nullif($21,''), $22,\n  nullif($23,''), nullif($24,'')\n)\non conflict (id_doc) do nothing;",
+        "query": "insert into comprobantes_wa (\n  id_doc, fecha_recibido, remitente_wa, nombre_contacto, tipo_archivo, url_drive,\n  ocr_estado, ocr_fecha_pago, ocr_valor, ocr_banco_origen, ocr_banco_destino,\n  ocr_referencia, ocr_cliente, ocr_confianza, clasificacion, id_mov_match,\n  estado, recibo_siigo, notas, human_review, id_compra_informado, grupo_origen,\n  categoria_gasto, oc_num\n) values (\n  $1::text, $2::text::timestamptz, $3::text, $4::text, $5::text, $6::text,\n  $7::text, nullif($8::text,'')::date, nullif($9::text,'')::numeric, $10::text, $11::text,\n  $12::text, $13::text, nullif($14::text,''), $15::text, nullif($16::text,''),\n  $17::text, nullif($18::text,''), $19::text, $20::text, nullif($21::text,''), $22::text,\n  nullif($23::text,''), nullif($24::text,'')\n)\non conflict (id_doc) do nothing;",
         "options": {
           "queryReplacement": "={{ [$json.ID_DOC, $json.FECHA_RECIBIDO, $json.REMITENTE_WA, $json.NOMBRE_CONTACTO, $json.TIPO_ARCHIVO, $json.URL_DRIVE, $json.OCR_ESTADO, $json.OCR_FECHA_PAGO, $json.OCR_VALOR, $json.OCR_BANCO_ORIGEN, $json.OCR_BANCO_DESTINO, $json.OCR_REFERENCIA, $json.OCR_CLIENTE, $json.OCR_CONFIANZA, $json.CLASIFICACION, $json.ID_MOV_MATCH, $json.ESTADO, $json.RECIBO_SIIGO, $json.NOTAS, $json.HUMAN_REVIEW, $json.ID_COMPRA_INFORMADO, $json.GRUPO_ORIGEN, $json.CATEGORIA_GASTO, $json.OC_NUM] }}"
         }
@@ -421,7 +421,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "update comprobantes_wa\nset id_compra_informado = $2, notas = $3, updated_at = now()\nwhere id_doc = $1;",
+        "query": "update comprobantes_wa\nset id_compra_informado = $2::text, notas = $3::text, updated_at = now()\nwhere id_doc = $1::text;",
         "options": {
           "queryReplacement": "={{ [$json.ID_DOC, $json.id_compra, $json.notas_nuevas] }}"
         }
