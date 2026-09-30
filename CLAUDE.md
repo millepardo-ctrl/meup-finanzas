@@ -120,9 +120,11 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
 0. Infra (repo, Supabase, credenciales Dropbox) — hecho.
 1. Repo scaffold + docs + workflows versionados — en curso (este commit).
 2. Schema Postgres en Supabase — hecho (`migrations/0001_schema_inicial.sql`).
-3. Migrar workflows de nodos Sheets → Postgres, empezando por `COMPRAS_DETALLE`,
-   `BANCOS_MOV`, `COMPROBANTES_WA` — siguiente paso.
-4. Editor de datos para contabilidad en Lovable (grilla tipo Excel sobre Supabase) + dashboard.
+3. Migrar workflows de nodos Sheets → Postgres, empezando por `COMPRAS_DETALLE`
+   (WF-09), `BANCOS_MOV` (WF-04), `COMPROBANTES_WA` (WF-01) — hecho, probados en
+   producción (30 sep 2026). Pendiente desactivar las versiones Sheets equivalentes
+   en n8n para que no corran en paralelo.
+4. Editor de datos para contabilidad en Lovable (grilla tipo Excel sobre Supabase) + dashboard — siguiente paso.
 5. Storage Drive → Dropbox.
 6. Diferido: SIIGO Fase 4, WhatsApp Cloud API, agente conversacional Telegram.
 
