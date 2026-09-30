@@ -3,51 +3,154 @@
   "nodes": [
     {
       "parameters": {
-        "pollTimes": { "item": [ { "mode": "everyHour" } ] },
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
         "triggerOn": "specificFolder",
-        "folderToWatch": { "__rl": true, "mode": "id", "value": "1WpCKmvNpMgVIia3dp9MWvRMhwDeRDpNP" },
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1WpCKmvNpMgVIia3dp9MWvRMhwDeRDpNP"
+        },
         "event": "fileCreated",
         "options": {}
       },
-      "id": "n1", "name": "Nuevo archivo de compras en Drive",
-      "type": "n8n-nodes-base.googleDriveTrigger", "typeVersion": 1, "position": [0, 0],
-      "credentials": { "googleDriveOAuth2Api": { "id": "REEMPLAZAR_CRED_GDRIVE", "name": "Google Drive MeUp" } }
+      "id": "n1",
+      "name": "Nuevo archivo de compras en Drive",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
     },
     {
       "parameters": {
         "operation": "download",
-        "fileId": { "__rl": true, "mode": "id", "value": "={{ $json.id }}" },
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
         "options": {}
       },
-      "id": "n2", "name": "Descargar xlsx",
-      "type": "n8n-nodes-base.googleDrive", "typeVersion": 3, "position": [220, 0],
-      "credentials": { "googleDriveOAuth2Api": { "id": "REEMPLAZAR_CRED_GDRIVE", "name": "Google Drive MeUp" } }
+      "id": "n2",
+      "name": "Descargar xlsx",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
     },
     {
       "parameters": {
         "operation": "xlsx",
-        "options": { "cellFormat": "RAW" }
+        "options": {
+          "cellFormat": "RAW"
+        }
       },
-      "id": "n3", "name": "Leer hoja Compras",
-      "type": "n8n-nodes-base.extractFromFile", "typeVersion": 1, "position": [440, 0]
+      "id": "n3",
+      "name": "Leer hoja Compras",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        440,
+        0
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// Aplana el maestro-detalle de Symphony y clasifica cada fila.\n// A diferencia de la versión Sheets, NO filtramos 'ya cargados' aquí:\n// eso ahora lo garantiza Postgres con ON CONFLICT en los 3 nodos de upsert.\nconst rows = $('Leer hoja Compras').all().map(i => i.json);\nconst NIT_PROPIO = '900570024';\nconst num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };\nconst det = []; const provLoc = {};\nlet idActual = null; let lineasPorId = {};\nconst cabRaw = {};\nfor (const r of rows) {\n  const tieneId = r.Id !== null && r.Id !== undefined && String(r.Id).trim() !== '';\n  if (tieneId) { idActual = parseInt(r.Id); cabRaw[idActual] = r; }\n  if (!idActual) continue;\n  const esFilaProducto = r.Productos !== null && r.Productos !== undefined && String(r.Productos).trim() !== '' && String(r.Productos).trim() !== 'nan';\n  if (!esFilaProducto && !tieneId) continue; // descarta solo filas vacías (ej. Retefuente sin producto)\n  if (!lineasPorId[idActual]) lineasPorId[idActual] = [];\n  lineasPorId[idActual].push(r);\n  const nit = r.Proveedor ? String(parseInt(r.Proveedor)) : '';\n  det.push({\n    destino: 'DETALLE', id_compra: String(idActual),\n    cod_producto: r.Productos !== null && r.Productos !== undefined ? String(r.Productos) : '',\n    producto: r.NombreProd || '', info: String(r.Informacion || '').slice(0, 40),\n    cantidad: num(r.Cantidad), costo_total: Math.round(num(r['Costo Total']) * 100) / 100,\n    venta_total: Math.round(num(r['Venta Total']) * 100) / 100, nit_proveedor: nit,\n    tipo_proveedor: nit === '' ? 'SIN_NIT' : (nit === NIT_PROPIO ? 'IMPORTADO' : 'LOCAL'),\n    retencion_desc: r['Retenciones Descripcion'] || ''\n  });\n  if (nit && nit !== NIT_PROPIO) {\n    const k = idActual + '|' + nit;\n    provLoc[k] = (provLoc[k] || 0) + num(r['Costo Total']);\n  }\n}\nconst outCab = Object.entries(cabRaw).map(([id, r]) => {\n  const nits = new Set((lineasPorId[id] || []).map(l => l.Proveedor ? String(parseInt(l.Proveedor)) : '').filter(Boolean));\n  const tipo = nits.size === 0 ? 'SIN_NIT' : (nits.size === 1 && nits.has(NIT_PROPIO) ? 'IMPORTADO' : (nits.has(NIT_PROPIO) ? 'MIXTO' : 'LOCAL'));\n  return { json: {\n    destino: 'CABECERA', id_compra: String(id), fecha: r['Fecha de Creación'] || null,\n    cliente: r.Nombre || '', documento: r.Documento || '', centro_costo: r['Centro de Costo'] || '',\n    vendedor: r.Vendedor || '', estado_symphony: r.Estado || '', gestion: r.Gestion || '',\n    valor_venta: Math.round(num(r.ValorVenta) * 100) / 100, valor_domicilio_cobrado: num(r['Valor domicilio']),\n    costo_transporte_symphony: num(r['Costo domicilio']), tipo_origen: tipo,\n    total_compra: num(r['Total Compra']), transportista_symphony: r.Trasnportista || '',\n    origen: r.Origen || '', destino_geo: r.Destino || ''\n  } };\n});\nconst outDet = det.map(d => ({ json: d }));\nconst outProv = Object.entries(provLoc).map(([k, v]) => {\n  const [id, nit] = k.split('|');\n  return { json: { destino: 'PROV_LOCAL', id_compra: id, nit_proveedor: nit, valor_costo: Math.round(v * 100) / 100 } };\n});\nreturn [...outCab, ...outDet, ...outProv];"
+        "jsCode": "// Aplana el maestro-detalle de Symphony y clasifica cada fila.\n// A diferencia de la versión Sheets, NO filtramos 'ya cargados' aquí:\n// eso ahora lo garantiza Postgres con ON CONFLICT en los 3 nodos de upsert.\nconst rows = $('Leer hoja Compras').all().map(i => i.json);\nconst NIT_PROPIO = '900570024';\nconst num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };\nconst parseFecha = v => {\n  if (v === null || v === undefined || String(v).trim() === '') return null;\n  if (v instanceof Date) return v.toISOString().slice(0, 10);\n  if (typeof v === 'number') { // serial de Excel\n    const ms = Math.round((v - 25569) * 86400 * 1000);\n    return new Date(ms).toISOString().slice(0, 10);\n  }\n  const s = String(v).trim();\n  let m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})/); // ISO\n  if (m) return `${m[1]}-${m[2]}-${m[3]}`;\n  m = s.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})/); // DD/MM/YYYY (formato Symphony/Colombia)\n  if (m) { const dd = m[1].padStart(2, '0'), mm = m[2].padStart(2, '0'); return `${m[3]}-${mm}-${dd}`; }\n  return null; // no bloquear la carga por una fecha rara: queda null y se revisa a mano\n};\nconst det = []; const provLoc = {};\nlet idActual = null; let lineasPorId = {};\nconst cabRaw = {};\nfor (const r of rows) {\n  const tieneId = r.Id !== null && r.Id !== undefined && String(r.Id).trim() !== '';\n  if (tieneId) { idActual = parseInt(r.Id); cabRaw[idActual] = r; }\n  if (!idActual) continue;\n  const esFilaProducto = r.Productos !== null && r.Productos !== undefined && String(r.Productos).trim() !== '' && String(r.Productos).trim() !== 'nan';\n  if (!esFilaProducto && !tieneId) continue; // descarta solo filas vacías (ej. Retefuente sin producto)\n  if (!lineasPorId[idActual]) lineasPorId[idActual] = [];\n  lineasPorId[idActual].push(r);\n  const nit = r.Proveedor ? String(parseInt(r.Proveedor)) : '';\n  det.push({\n    destino: 'DETALLE', id_compra: String(idActual),\n    cod_producto: r.Productos !== null && r.Productos !== undefined ? String(r.Productos) : '',\n    producto: r.NombreProd || '', info: String(r.Informacion || '').slice(0, 40),\n    cantidad: num(r.Cantidad), costo_total: Math.round(num(r['Costo Total']) * 100) / 100,\n    venta_total: Math.round(num(r['Venta Total']) * 100) / 100, nit_proveedor: nit,\n    tipo_proveedor: nit === '' ? 'SIN_NIT' : (nit === NIT_PROPIO ? 'IMPORTADO' : 'LOCAL'),\n    retencion_desc: r['Retenciones Descripcion'] || ''\n  });\n  if (nit && nit !== NIT_PROPIO) {\n    const k = idActual + '|' + nit;\n    provLoc[k] = (provLoc[k] || 0) + num(r['Costo Total']);\n  }\n}\nconst outCab = Object.entries(cabRaw).map(([id, r]) => {\n  const nits = new Set((lineasPorId[id] || []).map(l => l.Proveedor ? String(parseInt(l.Proveedor)) : '').filter(Boolean));\n  const tipo = nits.size === 0 ? 'SIN_NIT' : (nits.size === 1 && nits.has(NIT_PROPIO) ? 'IMPORTADO' : (nits.has(NIT_PROPIO) ? 'MIXTO' : 'LOCAL'));\n  return { json: {\n    destino: 'CABECERA', id_compra: String(id), fecha: parseFecha(r['Fecha de Creación']),\n    cliente: r.Nombre || '', documento: r.Documento || '', centro_costo: r['Centro de Costo'] || '',\n    vendedor: r.Vendedor || '', estado_symphony: r.Estado || '', gestion: r.Gestion || '',\n    valor_venta: Math.round(num(r.ValorVenta) * 100) / 100, valor_domicilio_cobrado: num(r['Valor domicilio']),\n    costo_transporte_symphony: num(r['Costo domicilio']), tipo_origen: tipo,\n    total_compra: num(r['Total Compra']), transportista_symphony: r.Trasnportista || '',\n    origen: r.Origen || '', destino_geo: r.Destino || ''\n  } };\n});\nconst outDet = det.map(d => ({ json: d }));\nconst outProv = Object.entries(provLoc).map(([k, v]) => {\n  const [id, nit] = k.split('|');\n  return { json: { destino: 'PROV_LOCAL', id_compra: id, nit_proveedor: nit, valor_costo: Math.round(v * 100) / 100 } };\n});\nreturn [...outCab, ...outDet, ...outProv];"
       },
-      "id": "n5", "name": "Aplanar + clasificar",
-      "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [680, 0]
+      "id": "n5",
+      "name": "Aplanar + clasificar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ]
     },
     {
       "parameters": {
-        "rules": { "values": [
-          { "conditions": { "options": {}, "conditions": [ { "leftValue": "={{ $json.destino }}", "rightValue": "CABECERA", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "CAB" },
-          { "conditions": { "options": {}, "conditions": [ { "leftValue": "={{ $json.destino }}", "rightValue": "DETALLE", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "DET" },
-          { "conditions": { "options": {}, "conditions": [ { "leftValue": "={{ $json.destino }}", "rightValue": "PROV_LOCAL", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "PROV" }
-        ] }
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.destino }}",
+                    "rightValue": "CABECERA",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "CAB"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.destino }}",
+                    "rightValue": "DETALLE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "DET"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.destino }}",
+                    "rightValue": "PROV_LOCAL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "PROV"
+            }
+          ]
+        }
       },
-      "id": "n6", "name": "Separar destinos",
-      "type": "n8n-nodes-base.switch", "typeVersion": 3, "position": [920, 0]
+      "id": "n6",
+      "name": "Separar destinos",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        920,
+        0
+      ]
     },
     {
       "parameters": {
@@ -57,9 +160,20 @@
           "queryReplacement": "={{ [$json.id_compra, $json.fecha, $json.cliente, $json.documento, $json.centro_costo, $json.vendedor, $json.estado_symphony, $json.gestion, $json.valor_venta, $json.valor_domicilio_cobrado, $json.costo_transporte_symphony, $json.tipo_origen, $json.total_compra, $json.transportista_symphony, $json.origen, $json.destino_geo] }}"
         }
       },
-      "id": "n7", "name": "Upsert COMPRAS_SYMPHONY",
-      "type": "n8n-nodes-base.postgres", "typeVersion": 2.5, "position": [1160, -200],
-      "credentials": { "postgres": { "id": "REEMPLAZAR_CRED_POSTGRES", "name": "Supabase MeUp Finanzas" } },
+      "id": "n7",
+      "name": "Upsert COMPRAS_SYMPHONY",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1160,
+        -200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      },
       "alwaysOutputData": true
     },
     {
@@ -70,9 +184,20 @@
           "queryReplacement": "={{ [$json.id_compra, $json.cod_producto, $json.producto, $json.info, $json.cantidad, $json.costo_total, $json.venta_total, $json.nit_proveedor, $json.tipo_proveedor, $json.retencion_desc] }}"
         }
       },
-      "id": "n8", "name": "Upsert COMPRAS_DETALLE",
-      "type": "n8n-nodes-base.postgres", "typeVersion": 2.5, "position": [1160, 0],
-      "credentials": { "postgres": { "id": "REEMPLAZAR_CRED_POSTGRES", "name": "Supabase MeUp Finanzas" } },
+      "id": "n8",
+      "name": "Upsert COMPRAS_DETALLE",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1160,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      },
       "alwaysOutputData": true
     },
     {
@@ -83,9 +208,20 @@
           "queryReplacement": "={{ [$json.id_compra, $json.nit_proveedor, $json.valor_costo] }}"
         }
       },
-      "id": "n9", "name": "Upsert PROVEEDORES_LOCALES_PAGOS",
-      "type": "n8n-nodes-base.postgres", "typeVersion": 2.5, "position": [1160, 200],
-      "credentials": { "postgres": { "id": "REEMPLAZAR_CRED_POSTGRES", "name": "Supabase MeUp Finanzas" } },
+      "id": "n9",
+      "name": "Upsert PROVEEDORES_LOCALES_PAGOS",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1160,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      },
       "alwaysOutputData": true
     },
     {
@@ -94,33 +230,142 @@
         "text": "=📦 Compras Symphony cargadas: {{ $('Nuevo archivo de compras en Drive').first().json.name }}",
         "additionalFields": {}
       },
-      "id": "n10", "name": "Confirmar carga",
-      "type": "n8n-nodes-base.telegram", "typeVersion": 1.2, "position": [1400, 0],
-      "credentials": { "telegramApi": { "id": "REEMPLAZAR_CRED_TELEGRAM", "name": "Telegram MeUp Bot" } }
+      "id": "n10",
+      "name": "Confirmar carga",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
     },
     {
       "parameters": {
         "content": "## WF-09 Postgres — notas de la migración\n\n- Se eliminaron los 3 nodos 'Leer ... ya cargado' de Sheets y los 2 `Wait` de 2s anti-rate-limit: ya no aplican, Postgres hace el upsert en una sola sentencia (`ON CONFLICT`).\n- `CABECERA` y `CABECERA_UPD` se fusionaron en un solo upsert: si `id_compra` no existe se inserta completo; si existe, solo se actualizan los campos mutables (estado, gestión, costo transporte, transportista) — el resto no se toca.\n- Detalle ahora es único por (id_compra, cod_producto) en vez de bloquear TODA la compra si ya tenía cualquier línea — una recarga con una línea nueva sí la agrega, sin duplicar las que ya estaban. Ver migrations/0002.\n- El storage (Drive) todavía no cambia — eso es la Fase 5. Esta migración es solo Sheets → Postgres.\n- Antes de activar: reemplazar REEMPLAZAR_CRED_POSTGRES por la credencial real 'Supabase MeUp Finanzas' creada en n8n, y desactivar el WF-09 viejo (Sheets) para que no corran los dos en paralelo.",
-        "height": 320, "width": 460
+        "height": 320,
+        "width": 460
       },
-      "id": "note1", "name": "Nota", "type": "n8n-nodes-base.stickyNote", "typeVersion": 1, "position": [0, -420]
+      "id": "note1",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -420
+      ]
     }
   ],
   "connections": {
-    "Nuevo archivo de compras en Drive": { "main": [ [ { "node": "Descargar xlsx", "type": "main", "index": 0 } ] ] },
-    "Descargar xlsx": { "main": [ [ { "node": "Leer hoja Compras", "type": "main", "index": 0 } ] ] },
-    "Leer hoja Compras": { "main": [ [ { "node": "Aplanar + clasificar", "type": "main", "index": 0 } ] ] },
-    "Aplanar + clasificar": { "main": [ [ { "node": "Separar destinos", "type": "main", "index": 0 } ] ] },
-    "Separar destinos": {
+    "Nuevo archivo de compras en Drive": {
       "main": [
-        [ { "node": "Upsert COMPRAS_SYMPHONY", "type": "main", "index": 0 } ],
-        [ { "node": "Upsert COMPRAS_DETALLE", "type": "main", "index": 0 } ],
-        [ { "node": "Upsert PROVEEDORES_LOCALES_PAGOS", "type": "main", "index": 0 } ]
+        [
+          {
+            "node": "Descargar xlsx",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Upsert COMPRAS_SYMPHONY": { "main": [ [ { "node": "Confirmar carga", "type": "main", "index": 0 } ] ] },
-    "Upsert COMPRAS_DETALLE": { "main": [ [ { "node": "Confirmar carga", "type": "main", "index": 0 } ] ] },
-    "Upsert PROVEEDORES_LOCALES_PAGOS": { "main": [ [ { "node": "Confirmar carga", "type": "main", "index": 0 } ] ] }
+    "Descargar xlsx": {
+      "main": [
+        [
+          {
+            "node": "Leer hoja Compras",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer hoja Compras": {
+      "main": [
+        [
+          {
+            "node": "Aplanar + clasificar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplanar + clasificar": {
+      "main": [
+        [
+          {
+            "node": "Separar destinos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Separar destinos": {
+      "main": [
+        [
+          {
+            "node": "Upsert COMPRAS_SYMPHONY",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upsert COMPRAS_DETALLE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upsert PROVEEDORES_LOCALES_PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert COMPRAS_SYMPHONY": {
+      "main": [
+        [
+          {
+            "node": "Confirmar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert COMPRAS_DETALLE": {
+      "main": [
+        [
+          {
+            "node": "Confirmar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert PROVEEDORES_LOCALES_PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Confirmar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1"
+  }
 }
