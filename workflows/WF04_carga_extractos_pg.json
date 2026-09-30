@@ -1,0 +1,278 @@
+{
+  "name": "MeUp WF-04 · Carga y normalización de extractos bancarios (Postgres)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1ZvVGnZFH2SQXul1EGsOzmwG5_iNS0KEX"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "n1",
+      "name": "Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {}
+      },
+      "id": "n2",
+      "name": "Descargar archivo",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "n3",
+      "name": "Leer CSV/XLSX",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalizador multi-banco → esquema BANCOS_MOV (v2, ajustado a formatos reales)\n// La CUENTA se deduce del nombre del archivo: debe contener el código, ej: 'BC-CTE-3762_2026-07.xlsx'\nconst filename = $('Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)').first().json.name || '';\nconst cuentaMatch = filename.match(/(BC-CTE-3762|BC-AHO-8985|DV-AHO-4335|DV-CTE-6614|BA-9030|BC-PAN-USD)/i);\nif (!cuentaMatch) throw new Error('El nombre del archivo debe incluir el código de cuenta de CAT_BANCOS. Ej: BC-CTE-3762_2026-07.xlsx o BC-PAN-USD_junio.xlsx');\nconst cuenta = cuentaMatch[1].toUpperCase();\nconst moneda = cuenta === 'BC-PAN-USD' ? 'USD' : 'COP';\n\nfunction parseValor(v) {\n  if (typeof v === 'number') return v;\n  // Quita letras (COP/USD), símbolo $, espacios y NBSP: 'COP -$ 15.476.400,00' → '-15.476.400,00'\n  let s = String(v || '').replace(/[A-Za-z$\\s\\u00A0]/g, '');\n  if (/,\\d{1,2}$/.test(s)) s = s.replace(/\\./g, '').replace(',', '.'); // formato CO: 1.500.000,50\n  else s = s.replace(/,/g, ''); // formato US: 1,500,000.50\n  const n = parseFloat(s);\n  return isNaN(n) ? 0 : n;\n}\nfunction parseFecha(v) {\n  if (v instanceof Date) return v.toISOString().slice(0,10);\n  // Serial de Excel (n8n lee las fechas del xlsx como número: 45843 = 2025-07-05)\n  if (typeof v === 'number' && v > 20000 && v < 80000) {\n    return new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000).toISOString().slice(0,10);\n  }\n  const s = String(v || '').trim();\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000).toISOString().slice(0,10); }\n  let m = s.match(/^(\\d{4})[-\\/](\\d{1,2})[-\\/](\\d{1,2})/);      // AAAA/MM/DD\n  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');\n  m = s.match(/^(\\d{1,2})[-\\/](\\d{1,2})[-\\/](\\d{4})/);          // DD/MM/AAAA (formato bancos Colombia)\n  if (m) return m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');\n  return s.slice(0,10);\n}\nfunction pick(row, patterns) {\n  // Devuelve el valor de la primera columna cuyo nombre coincide con alguno de los patrones\n  for (const pat of patterns) {\n    for (const k of Object.keys(row)) {\n      if (pat.test(k)) return row[k];\n    }\n  }\n  return '';\n}\nfunction clasificar(desc, valor, refTexto) {\n  const d = String(desc || '').toUpperCase();\n  if (d.includes('4X1000') || d.includes('IMPTO GOBIERNO')) return ['IMPUESTO', '4X1000'];\n  if (d.includes('ABONO INTERESES')) return ['INGRESO', 'INTERES_GANADO'];\n  if (d.includes('PRESTAMO') || d.includes('PAGOPTMO')) return ['EGRESO', 'PAGO_CREDITO'];\n  if (d.includes('INTERES')) return ['EGRESO', 'INTERES_CREDITO'];\n  if (d.includes('COMISION') || d.includes('CUOTA MANEJO') || d.includes('IVA COMIS') || d.includes('SWIFT') || d.includes('FEE COLLEC') || d.includes('COBRO MENSUAL')) return ['GASTO_BANCARIO', 'COMISION'];\n  // TRASLADO solo si la referencia/descripción contiene el número de una cuenta PROPIA;\n  // 'Transferencia cta suc virtual' en Bancolombia es genérico (puede ser pago a cualquiera).\n  if ((d.includes('TRANSFERENCIA CTA SUC') || d.includes('TRASLADO')) && /(3762|8985|4335|6614|9030|3826)/.test(d + ' ' + String(refTexto || ''))) return ['TRASLADO', 'TRASLADO_INTERNO'];\n  if (d.includes('NOMINA') || d.includes('SALARIO')) return ['EGRESO', 'NOMINA'];\n  if (d.includes('GOOGLE') || d.includes('ADS') || d.includes('META PLATFORMS')) return ['EGRESO', 'PUBLICIDAD'];\n  if (d.includes('PAGO PSE') && valor < 0) return ['EGRESO', 'PAGO_PROVEEDOR'];\n  if ((d.includes('DESDE NEQUI') || d.includes('PAGO LLAVE') || d.includes('CONSIGNACION')) && valor > 0) return ['INGRESO', 'VENTA'];\n  if (d.includes('TRANSFERENCIA EXT DE') && valor > 0) return ['INGRESO', 'TRANSFERENCIA_INTL'];\n  if (valor > 0) return ['INGRESO', 'POR_CLASIFICAR'];\n  return ['EGRESO', 'POR_CLASIFICAR'];\n}\nconst rows = $('Leer CSV/XLSX').all().map(i => i.json);\nlet seq = Date.now();\nconst out = [];\nfor (const r of rows) {\n  const fechaRaw = pick(r, [/^fecha( aplicaci)?/i, /^fecha$/i]);\n  const desc = pick(r, [/descrip/i]);\n  const valorRaw = pick(r, [/^valor$/i, /valor/i]);\n  if (!desc && !valorRaw) continue; // fila vacía o de encabezado repetido\n  const ref1 = pick(r, [/referencia 1/i, /n[uú]mero de la transacci/i, /^referencia$/i]);\n  const ref2 = pick(r, [/referencia 2/i]);\n  const valor = parseValor(valorRaw);\n  if (valor === 0 && !desc) continue;\n  const [tipo, cat] = clasificar(desc, valor, [ref1, ref2].join(' '));\n  const fecha = parseFecha(fechaRaw);\n  out.push({ json: {\n    id_mov: 'MOV-' + (seq++).toString().slice(-9),\n    fecha: fecha,\n    cuenta: cuenta,\n    descripcion: String(desc).trim(),\n    referencia: [ref1, ref2].map(x => String(x || '').trim()).filter(x => x && x !== '- -' && x !== '--').join(' | '),\n    moneda: moneda,\n    valor: valor,\n    tipo: tipo,\n    categoria: cat\n  }});\n}\nif (out.length === 0) throw new Error('El archivo no produjo movimientos: revisar que la primera fila tenga los encabezados del banco.');\nreturn out;"
+      },
+      "id": "n4",
+      "name": "Normalizar a esquema BANCOS_MOV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into bancos_mov (id_mov, fecha, cuenta, descripcion, referencia, moneda, valor, tipo, categoria, origen)\nvalues ($1,$2,$3,$4,$5,$6,$7,$8,$9,'EXTRACTO')\non conflict (id_mov) do nothing;",
+        "options": {
+          "queryReplacement": "={{ [$json.id_mov, $json.fecha, $json.cuenta, $json.descripcion, $json.referencia, $json.moneda, $json.valor, $json.tipo, $json.categoria] }}"
+        }
+      },
+      "id": "n5",
+      "name": "Insertar en BANCOS_MOV",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_POSTGRES",
+          "name": "Supabase MeUp Finanzas"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Colapsa las N filas insertadas en un solo resultado antes de seguir.\nconst total = $('Normalizar a esquema BANCOS_MOV').all().length;\nreturn [{ json: { total } }];"
+      },
+      "id": "n5b",
+      "name": "Finalizar carga",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)').first().json.id }}"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1XUtf8phyHkD3Pg3bHt_B3bXwZMNxZBbk"
+        }
+      },
+      "id": "n6",
+      "name": "Mover a PROCESADOS",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1320,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-5559621779",
+        "text": "=✅ Extracto cargado: {{ $('Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)').first().json.name }} → {{ $('Finalizar carga').first().json.total }} movimientos en BANCOS_MOV.",
+        "additionalFields": {}
+      },
+      "id": "n7",
+      "name": "Confirmar por Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## WF-04 Postgres — notas de la migración\n\n- cuenta (CAT_BANCOS) y CATEGORIA siguen siendo el mismo normalizador de siempre — no se tocó la lógica de clasificación ni el parser tolerante de fechas/valores, ya validados.\n- bancos_mov.cuenta tiene FK a cat_bancos: las 6 cuentas (BC-CTE-3762, BC-AHO-8985, DV-AHO-4335, DV-CTE-6614, BA-9030, BC-PAN-USD) ya están sembradas en Supabase.\n- 'Finalizar carga' colapsa las N filas insertadas en 1 solo resultado antes de mover el archivo y avisar por Telegram — si no, se movería/avisaría una vez POR MOVIMIENTO bancario.\n- Storage sigue en Drive (Fase 5 lo pasa a Dropbox). Esta migración es solo Sheets → Postgres.\n- Antes de activar: reemplazar REEMPLAZAR_CRED_POSTGRES por 'Supabase MeUp Finanzas', y desactivar el WF-04 viejo (Sheets) para que no corran los dos en paralelo.",
+        "height": 300,
+        "width": 460
+      },
+      "id": "note1",
+      "name": "Nota",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -380
+      ]
+    }
+  ],
+  "connections": {
+    "Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)": {
+      "main": [
+        [
+          {
+            "node": "Descargar archivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar archivo": {
+      "main": [
+        [
+          {
+            "node": "Leer CSV/XLSX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer CSV/XLSX": {
+      "main": [
+        [
+          {
+            "node": "Normalizar a esquema BANCOS_MOV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar a esquema BANCOS_MOV": {
+      "main": [
+        [
+          {
+            "node": "Insertar en BANCOS_MOV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insertar en BANCOS_MOV": {
+      "main": [
+        [
+          {
+            "node": "Finalizar carga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalizar carga": {
+      "main": [
+        [
+          {
+            "node": "Mover a PROCESADOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mover a PROCESADOS": {
+      "main": [
+        [
+          {
+            "node": "Confirmar por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
