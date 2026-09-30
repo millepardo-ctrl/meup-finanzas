@@ -227,7 +227,7 @@
     {
       "parameters": {
         "chatId": "-5559621779",
-        "text": "=📦 Compras Symphony cargadas: {{ $('Nuevo archivo de compras en Drive').first().json.name }}",
+        "text": "=📦 Compras Symphony cargadas: {{ $json.total }} compra(s) procesada(s), período {{ $json.rango }} — archivo {{ $('Nuevo archivo de compras en Drive').first().json.name }}",
         "additionalFields": {}
       },
       "id": "n10",
@@ -235,8 +235,8 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1400,
-        0
+        1840,
+        100
       ],
       "credentials": {
         "telegramApi": {
@@ -258,6 +258,34 @@
       "position": [
         0,
         -420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 3,
+        "options": {}
+      },
+      "id": "nmerge",
+      "name": "Esperar los 3 upserts",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1400,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Un solo resumen de la carga completa, sin importar cuántas filas se hayan escrito.\nconst cabeceras = $('Aplanar + clasificar').all().filter(i => i.json.destino === 'CABECERA').map(i => i.json);\nconst fechas = cabeceras.map(c => c.fecha).filter(Boolean).sort();\nconst desde = fechas[0] || null;\nconst hasta = fechas[fechas.length - 1] || null;\nconst rango = desde && hasta ? (desde === hasta ? desde : `${desde} a ${hasta}`) : 'sin fecha en el archivo';\nreturn [{ json: { total: cabeceras.length, rango } }];"
+      },
+      "id": "nresumen",
+      "name": "Resumen de carga",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1620,
+        100
       ]
     }
   ],
@@ -335,7 +363,7 @@
       "main": [
         [
           {
-            "node": "Confirmar carga",
+            "node": "Esperar los 3 upserts",
             "type": "main",
             "index": 0
           }
@@ -346,14 +374,36 @@
       "main": [
         [
           {
-            "node": "Confirmar carga",
+            "node": "Esperar los 3 upserts",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Upsert PROVEEDORES_LOCALES_PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Esperar los 3 upserts",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Esperar los 3 upserts": {
+      "main": [
+        [
+          {
+            "node": "Resumen de carga",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Upsert PROVEEDORES_LOCALES_PAGOS": {
+    "Resumen de carga": {
       "main": [
         [
           {
