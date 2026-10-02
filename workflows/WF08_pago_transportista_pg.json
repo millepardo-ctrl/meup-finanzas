@@ -334,7 +334,7 @@
         "operation": "executeQuery",
         "query": "update comprobantes_wa set id_mov_match = $2::text, estado = 'CONCILIADO_TRANSPORTE',\n  human_review = 'PENDIENTE', updated_at = now()\nwhere id_doc = $1::text;",
         "options": {
-          "queryReplacement": "={{ [$('Gestionar abono / saldo').item.json.j.doc.ID_DOC, $json.ID_MOV || $json.fila?.ID_MOV] }}"
+          "queryReplacement": "={{ [$('Gestionar abono / saldo').item.json.j.doc.ID_DOC, $('Preparar registro bancario').item.json.ID_MOV || $('Preparar registro bancario').item.json.fila?.ID_MOV] }}"
         }
       },
       "id": "n14",
@@ -403,7 +403,7 @@
     {
       "parameters": {
         "chatId": "-5154074469",
-        "text": "=🔴 *POSIBLE PAGO DUPLICADO a transportista*\\nComprobante {{ $json.doc.ID_DOC }} · {{ $json.pago.TRANSPORTISTA }}\\nValor: ${{ $json.doc.OCR_VALOR }}\\n{{ $json.motivo }}\\nRevisar antes de cualquier otro pago: {{ $json.doc.URL_DRIVE }}",
+        "text": "=🔴 *POSIBLE PAGO DUPLICADO a transportista*\\nComprobante {{ $('Motor de matching transportes').item.json.doc.ID_DOC }} · {{ $('Motor de matching transportes').item.json.pago.TRANSPORTISTA }}\\nValor: ${{ $('Motor de matching transportes').item.json.doc.OCR_VALOR }}\\n{{ $('Motor de matching transportes').item.json.motivo }}\\nRevisar antes de cualquier otro pago: {{ $('Motor de matching transportes').item.json.doc.URL_DRIVE }}",
         "additionalFields": {
           "parse_mode": "Markdown",
           "parseMode": "None",
@@ -428,7 +428,7 @@
     {
       "parameters": {
         "chatId": "-5154074469",
-        "text": "=⚠️ Comprobante de egreso sin match en transportes\\n{{ $json.doc.ID_DOC }} · ${{ $json.doc.OCR_VALOR }}\\n{{ $json.motivo }}\\n{{ $json.doc.URL_DRIVE }}",
+        "text": "=⚠️ Comprobante de egreso sin match en transportes\\n{{ $('Motor de matching transportes').item.json.doc.ID_DOC }} · ${{ $('Motor de matching transportes').item.json.doc.OCR_VALOR }}\\n{{ $('Motor de matching transportes').item.json.motivo }}\\n{{ $('Motor de matching transportes').item.json.doc.URL_DRIVE }}",
         "additionalFields": {
           "parseMode": "None",
           "appendAttribution": false

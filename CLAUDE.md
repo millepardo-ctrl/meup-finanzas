@@ -87,6 +87,19 @@ Diccionario de columnas exacto (heredado de Sheets, ahora también en Postgres):
 8. **Telegram permite un solo Trigger activo por bot en toda la instancia n8n.** Cualquier
    feature conversacional nuevo es una ruta más dentro del router existente, nunca un
    trigger nuevo.
+9. **Un nodo Postgres de escritura (INSERT/UPDATE con `executeQuery`) NO hace echo del
+   input como output**, a diferencia de los nodos de Sheets (append/update), que sí
+   devuelven la fila de entrada como salida. Cualquier nodo aguas abajo que dependa de
+   `$json.CAMPO` "a secas" para un dato que se originó antes del nodo Postgres recibe
+   `undefined` en silencio (no hay error — el mensaje sale, la fila se escribe, pero con
+   campos vacíos). Encontrado en producción en WF-02/07/08 durante la migración (2 oct
+   2026): una alerta de Telegram salió con todos los placeholders vacíos porque el nodo
+   de alerta leía `$json` después de un `UPDATE` de Postgres que no traía esos campos.
+   **Regla:** después de cualquier nodo Postgres de escritura, todo nodo siguiente debe
+   referenciar los campos con `$('NodoOrigen').item.json.CAMPO` (el nodo Code/lectura
+   donde nació el dato), nunca `$json.CAMPO` a secas. Los nodos IF/Switch sí preservan
+   el pass-through correctamente — el problema es exclusivo de los nodos Postgres de
+   escritura.
 
 ## Estructura del repo
 

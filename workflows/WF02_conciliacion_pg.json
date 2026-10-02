@@ -154,7 +154,7 @@
         "operation": "executeQuery",
         "query": "update comprobantes_wa set id_mov_match = $2::text, estado = 'CONCILIADO', updated_at = now()\nwhere id_doc = $1::text;",
         "options": {
-          "queryReplacement": "={{ [$json.ID_DOC, $json.mov.ID_MOV] }}"
+          "queryReplacement": "={{ [$('Motor de matching').item.json.ID_DOC, $('Motor de matching').item.json.mov.ID_MOV] }}"
         }
       },
       "id": "n7",
@@ -198,7 +198,7 @@
     {
       "parameters": {
         "chatId": "-5363971034",
-        "text": "=⚠️ Comprobante sin conciliar\\nID: {{ $json.ID_DOC }}\\nCliente OCR: {{ $json.OCR_CLIENTE }}\\nValor: ${{ $json.OCR_VALOR }}\\nMotivo: {{ $json.motivo || $json.candidatos }}\\nDrive: {{ $json.URL_DRIVE }}",
+        "text": "=⚠️ Comprobante sin conciliar\\nID: {{ $('Motor de matching').item.json.ID_DOC }}\\nCliente OCR: {{ $('Motor de matching').item.json.OCR_CLIENTE }}\\nValor: ${{ $('Motor de matching').item.json.OCR_VALOR }}\\nMotivo: {{ $('Motor de matching').item.json.motivo || $('Motor de matching').item.json.candidatos }}\\nDrive: {{ $('Motor de matching').item.json.URL_DRIVE }}",
         "additionalFields": {
           "parseMode": "None",
           "appendAttribution": false

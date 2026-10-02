@@ -137,7 +137,7 @@
           "options": {},
           "conditions": [
             {
-              "leftValue": "={{ $json.ESTADO }}",
+              "leftValue": "={{ $('Estructurar + validar vs Symphony + dedup').item.json.ESTADO }}",
               "rightValue": "PENDIENTE",
               "operator": {
                 "type": "string",
@@ -161,7 +161,7 @@
         "operation": "executeQuery",
         "query": "insert into transportes_pagos (\n  id_pago, id_solicitud, id_compra, transportista, cedula, tipo, valor, medio_pago,\n  estado, human_review, notas, retencion, pago_neto\n) values (\n  $1::text, $2::text, nullif($3::text,''), $4::text, $5::text, $6::text, nullif($7::text,'')::numeric,\n  $8::text, $9::text, $10::text, $11::text, nullif($12::text,'')::numeric, nullif($13::text,'')::numeric\n)\non conflict (id_pago) do nothing;",
         "options": {
-          "queryReplacement": "={{ ['TRP-' + Date.now().toString().slice(-9) + $itemIndex, $json.ID_SOLICITUD, $json.ID_COMPRA, $json.TRANSPORTISTA, $json.CEDULA, $json.TIPO, $json.VALOR_SOLICITADO, $json.MEDIO_PAGO, 'PENDIENTE', 'PENDIENTE', 'Creado por WF-07', $json.RETENCION, $json.PAGO_NETO] }}"
+          "queryReplacement": "={{ ['TRP-' + Date.now().toString().slice(-9) + $itemIndex, $('Estructurar + validar vs Symphony + dedup').item.json.ID_SOLICITUD, $('Estructurar + validar vs Symphony + dedup').item.json.ID_COMPRA, $('Estructurar + validar vs Symphony + dedup').item.json.TRANSPORTISTA, $('Estructurar + validar vs Symphony + dedup').item.json.CEDULA, $('Estructurar + validar vs Symphony + dedup').item.json.TIPO, $('Estructurar + validar vs Symphony + dedup').item.json.VALOR_SOLICITADO, $('Estructurar + validar vs Symphony + dedup').item.json.MEDIO_PAGO, 'PENDIENTE', 'PENDIENTE', 'Creado por WF-07', $('Estructurar + validar vs Symphony + dedup').item.json.RETENCION, $('Estructurar + validar vs Symphony + dedup').item.json.PAGO_NETO] }}"
         }
       },
       "id": "n7",
@@ -182,7 +182,7 @@
     {
       "parameters": {
         "chatId": "-5154074469",
-        "text": "=🚛 *Solicitud de pago a transportista*\\n{{ $json.ID_SOLICITUD }} · Compra {{ $json.ID_COMPRA }}\\n{{ $json.TRANSPORTISTA }} (CC {{ $json.CEDULA }})\\nValor bruto: ${{ $json.VALOR_SOLICITADO }} ({{ $json.TIPO }})\\n💰 *PAGAR NETO: ${{ $json.PAGO_NETO }}* (retefuente ${{ $json.RETENCION }})\\nMedio: {{ $json.MEDIO_PAGO }} → {{ $json.TELEFONO }}\\nCta cobro {{ $json.CUENTA_COBRO }} · Rem {{ $json.REMISION }}\\n{{ $json.NOTAS.startsWith('⚠️') ? $json.NOTAS.split(' | Texto:')[0] : '' }}",
+        "text": "=🚛 *Solicitud de pago a transportista*\\n{{ $('Estructurar + validar vs Symphony + dedup').item.json.ID_SOLICITUD }} · Compra {{ $('Estructurar + validar vs Symphony + dedup').item.json.ID_COMPRA }}\\n{{ $('Estructurar + validar vs Symphony + dedup').item.json.TRANSPORTISTA }} (CC {{ $('Estructurar + validar vs Symphony + dedup').item.json.CEDULA }})\\nValor bruto: ${{ $('Estructurar + validar vs Symphony + dedup').item.json.VALOR_SOLICITADO }} ({{ $('Estructurar + validar vs Symphony + dedup').item.json.TIPO }})\\n💰 *PAGAR NETO: ${{ $('Estructurar + validar vs Symphony + dedup').item.json.PAGO_NETO }}* (retefuente ${{ $('Estructurar + validar vs Symphony + dedup').item.json.RETENCION }})\\nMedio: {{ $('Estructurar + validar vs Symphony + dedup').item.json.MEDIO_PAGO }} → {{ $('Estructurar + validar vs Symphony + dedup').item.json.TELEFONO }}\\nCta cobro {{ $('Estructurar + validar vs Symphony + dedup').item.json.CUENTA_COBRO }} · Rem {{ $('Estructurar + validar vs Symphony + dedup').item.json.REMISION }}\\n{{ $('Estructurar + validar vs Symphony + dedup').item.json.NOTAS.startsWith('⚠️') ? $('Estructurar + validar vs Symphony + dedup').item.json.NOTAS.split(' | Texto:')[0] : '' }}",
         "additionalFields": {
           "parse_mode": "Markdown",
           "parseMode": "None",
@@ -207,7 +207,7 @@
     {
       "parameters": {
         "chatId": "-5154074469",
-        "text": "=⚠️ Solicitud {{ $json.ESTADO }}\\n{{ $json.ID_SOLICITUD }} · {{ $json.TRANSPORTISTA }}\\n{{ $json.NOTAS }}",
+        "text": "=⚠️ Solicitud {{ $('Estructurar + validar vs Symphony + dedup').item.json.ESTADO }}\\n{{ $('Estructurar + validar vs Symphony + dedup').item.json.ID_SOLICITUD }} · {{ $('Estructurar + validar vs Symphony + dedup').item.json.TRANSPORTISTA }}\\n{{ $('Estructurar + validar vs Symphony + dedup').item.json.NOTAS }}",
         "additionalFields": {
           "parseMode": "None",
           "appendAttribution": false
