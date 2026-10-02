@@ -299,7 +299,10 @@
           "id": "REEMPLAZAR_CRED_ANTHROPIC",
           "name": "Anthropic x-api-key"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
