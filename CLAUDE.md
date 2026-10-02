@@ -157,3 +157,15 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
 - `WF-BOT-COTIZACIONES` — bot de precios de proveedores.
 - Agente Frida (OpenClaw) — prospección de proveedores.
 - Motor de precios / ficha técnica — skills propias de Claude, no viven aquí.
+- **`inventario-meup`** — sistema de inventario, Supabase project propio
+  (`mqgzsskdvdgvqjswxovm`, misma organización de Supabase que `meup-finanzas`
+  pero proyecto distinto) + su propio Lovable. No fusionar en un monorepo con
+  este repo ni conectar en vivo vía Supabase Wrappers/FDW para el día a día:
+  acopla la disponibilidad de finanzas a la de inventario. Cuando se construya
+  costeo (inventario ↔ financiero), el patrón a seguir es el mismo que
+  `BANCOS_MOV.ORIGEN` (`EXTRACTO` vs `TRANSPORTE_APP`): un workflow n8n nuevo
+  (candidato `WF-12`) que copia de solo lectura los campos necesarios
+  (SKU, cantidad, costo promedio, bodega) hacia una tabla caché en
+  `meup-finanzas` (ej. `inv_existencias_cache`), nunca escritura en sentido
+  contrario. La vista/tabla de costeo hace el `JOIN` localmente contra esa
+  caché, no contra el otro proyecto en tiempo real.
