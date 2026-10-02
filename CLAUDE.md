@@ -131,35 +131,36 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
 `docs/03_diccionario_datos.md`/este archivo para el estado vigente:
 
 0. Infra (repo, Supabase, credenciales Dropbox) — hecho.
-1. Repo scaffold + docs + workflows versionados — en curso (este commit).
+1. Repo scaffold + docs + workflows versionados — hecho.
 2. Schema Postgres en Supabase — hecho (`migrations/0001_schema_inicial.sql`).
-3. Migrar workflows de nodos Sheets → Postgres:
-   - `COMPRAS_DETALLE` (WF-09), `BANCOS_MOV` (WF-04), `COMPROBANTES_WA` (WF-01)
-     — hecho, probados en producción (30 sep 2026).
-   - `CONCILIACION` (WF-02), `TRANSPORTES_SOLICITUDES`/`TRANSPORTES_PAGOS` (WF-07,
-     WF-08) — hecho (`workflows/WF02_conciliacion_pg.json`,
-     `WF07_v2_solicitud_transporte_pg.json`, `WF08_pago_transportista_pg.json`),
-     validados con queries de prueba contra Supabase (30 sep 2026). Pendiente
-     importarlos en n8n y activarlos.
-   - Pendiente en todos los casos: desactivar la versión Sheets equivalente en
-     n8n una vez la Postgres quede corriendo en producción, para que no corran
-     en paralelo.
+3. Migrar workflows de nodos Sheets → Postgres — **hecho, cerrado (2 oct 2026).**
+   - `COMPRAS_DETALLE` (WF-09), `BANCOS_MOV` (WF-04), `COMPROBANTES_WA` (WF-01),
+     `CONCILIACION` (WF-02), `TRANSPORTES_SOLICITUDES`/`TRANSPORTES_PAGOS`
+     (WF-07, WF-08) — los 6 migrados, importados, activados y probados en
+     producción. Las versiones Sheets equivalentes quedaron desactivadas en
+     n8n y movidas a `workflows/obsoletos/`.
    - Bugs de esquema encontrados y corregidos en el camino: `ocr_confianza`
      (era `numeric`, es texto categórico ALTA/MEDIA/BAJA — migración 0003),
      `retefuente_aplica` (era `boolean`, es tri-estado POR_CONFIRMAR/SI/NO —
-     migración 0004), y `transportes_solicitudes.valor_solicitado` relajado a
-     nullable (fila de "revisar a mano" cuando el parser no extrae nada).
-   - Patrón nuevo confirmado en WF-07/08/02: varias tablas tienen FK estrictas
+     migración 0004, y migración 0007 que además le quitó el NOT NULL porque
+     la fila "revisar a mano" de WF-07 la manda en null explícito), y
+     `transportes_solicitudes.valor_solicitado` relajado a nullable (migración
+     0005, mismo caso).
+   - Patrón confirmado en WF-07/08/02: varias tablas tienen FK estrictas
      (`id_compra`, `id_mov_banco`, `id_doc_wa`, `cuenta`→`cat_bancos`). El código
      de cada workflow debe dejar esos campos en null cuando la referencia no
      existe todavía, en vez de bloquear el insert — coherente con el patrón
      anti-bug #7 (nunca bloquear por un dato no resuelto).
+   - Bug de producción encontrado y corregido tras activar: el patrón anti-bug
+     #9 (nodos Postgres de escritura no hacen echo del input) rompía las
+     alertas de Telegram de los 3 flujos — corregido en los JSON vigentes.
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
-   Proveedores, Bancos, Catálogos, Transportes, Conciliación, y la mayoría de
-   KPIs del dashboard. Pendiente: gráficos adicionales del dashboard y RLS por
-   rol (hoy es "authenticated = acceso total").
+   Proveedores, Bancos, Catálogos, Transportes, Conciliación, Rentabilidad
+   (`v_rentabilidad_compra`, % y $ COP separados por producto/transporte) y
+   la mayoría de KPIs del dashboard. Pendiente: gráficos adicionales del
+   dashboard y RLS por rol (hoy es "authenticated = acceso total").
 5. Storage Drive → Dropbox.
 6. Diferido: SIIGO Fase 4, WhatsApp Cloud API, agente conversacional Telegram.
 
