@@ -183,18 +183,38 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        `ESTADO='ARCHIVO'` (igual que `ORDEN_COMPRA`), y el prompt de OCR
        pide extraer proveedor + número de OC/pedido referenciado también
        para facturas.
-     - **Limitación conocida de WF10_pg:** el nivel de confianza más fuerte
-       (misma OC, 7 días) solo vincula si el comprobante de pago trae el
-       número de OC/ID de compra — ya sea porque el OCR lo lee directo del
-       comprobante, o porque quien lo envía a Telegram lo escribe en el
-       caption (ej. "OC 16101"), igual que ya se hace en el grupo Pagos. Un
-       comprobante de transferencia bancaria normal casi nunca menciona la
-       OC por sí solo — **para que la vinculación automática funcione de
-       forma confiable, quien envía el comprobante a Contabilidad debe
-       escribir el número de OC/ID en el mensaje.** Sin eso, el egreso
-       igual se concilia contra el banco (no se pierde), pero no se vincula
-       automáticamente con su factura/OC ni marca el proveedor como pagado
-       — queda para revisión manual.
+     - **Rediseñado (3 oct 2026) tras feedback de Milena:** un comprobante de
+       transferencia normal no trae el ID de la compra (eso fue una
+       suposición incorrecta de la primera versión) — lo único estable que
+       trae es la **cuenta de destino**. Rediseño: `cat_terceros` ganó una
+       columna `cuenta_bancaria` (migración 0010), y el prompt de OCR de
+       WF-01 ahora extrae `cuenta_destino` del comprobante
+       (`comprobantes_wa.ocr_cuenta_destino`). WF10_pg identifica al tercero
+       buscando esa cuenta en `cat_terceros` ANTES de intentar nada por OC:
+       - `tipo='PROVEEDOR_LOCAL'` → resuelve el NIT y busca, entre las
+         deudas pendientes de ESE proveedor en `PROVEEDORES_LOCALES_PAGOS`,
+         la que coincide en valor (exacta = `PAGADO`, menor = `ABONADO`
+         parcial, única deuda pendiente = se asume aunque el valor no calce
+         exacto). El número de OC/ID explícito en el comprobante (si acaso
+         llega) sigue teniendo prioridad cuando está presente.
+       - `tipo='COLABORADOR'` (nómina) → no hay cuenta por cobrar que
+         marcar, solo categoriza el movimiento como `NOMINA` con el nombre
+         del colaborador como tercero.
+       - Si la cuenta no está en el catálogo (o el comprobante no tiene
+         cuenta reconocible) el egreso **igual se concilia contra el banco**
+         — nunca se bloquea — solo queda sin proveedor/colaborador
+         vinculado, para revisión manual. Este es el caso normal de gastos
+         de logística/domicilios que se pagan a diario sin que la factura
+         haya llegado todavía: quedan categorizados y conciliados, sin
+         necesitar ningún soporte.
+       - La vinculación factura/OC ↔ comprobante (3 niveles) ahora también
+         usa "mismo proveedor vía cuenta" como segundo nivel de confianza
+         (entre "misma OC explícita" y "mismo remitente+valor 24h").
+     - **Pendiente de Milena:** cargar `cat_terceros.cuenta_bancaria` para
+       los proveedores y colaboradores de nómina que se quiera que el
+       sistema reconozca automáticamente (vía Lovable o pidiéndomelo a mí
+       con la lista). Sin esos datos cargados, el sistema sigue funcionando
+       pero sin la vinculación automática — como hasta ahora.
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
