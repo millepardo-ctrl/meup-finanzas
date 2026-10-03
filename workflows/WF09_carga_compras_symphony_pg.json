@@ -203,7 +203,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "with stub as (\n  insert into cat_terceros (nit, nombre, tipo)\n  values ($2, 'PROVEEDOR LOCAL ' || $2, 'PROVEEDOR_LOCAL')\n  on conflict (nit) do nothing\n)\ninsert into proveedores_locales_pagos (id_control, id_compra, nit_proveedor, valor_costo, estado_pago, human_review, notas)\nvalues ('PLP-' || $1 || '-' || $2, $1, $2, $3, 'PENDIENTE', 'PENDIENTE', 'Generado por WF-09')\non conflict (id_compra, nit_proveedor) do update set\n  valor_costo = excluded.valor_costo,\n  updated_at = now();",
+        "query": "with stub as (\n  insert into cat_terceros (nit, nombre, tipo)\n  values ($2, 'PROVEEDOR LOCAL ' || $2, 'PROVEEDOR_LOCAL')\n  on conflict (nit) do nothing\n)\ninsert into proveedores_locales_pagos (id_control, id_compra, nit_proveedor, proveedor_nombre, valor_costo, estado_pago, human_review, notas)\nvalues (\n  'PLP-' || $1 || '-' || $2, $1, $2,\n  (select nombre from cat_terceros where nit = $2),\n  $3, 'PENDIENTE', 'PENDIENTE', 'Generado por WF-09'\n)\non conflict (id_compra, nit_proveedor) do update set\n  valor_costo = excluded.valor_costo,\n  proveedor_nombre = (select nombre from cat_terceros where nit = excluded.nit_proveedor),\n  updated_at = now();",
         "options": {
           "queryReplacement": "={{ [$json.id_compra, $json.nit_proveedor, $json.valor_costo] }}"
         }

@@ -215,6 +215,30 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        sistema reconozca automáticamente (vía Lovable o pidiéndomelo a mí
        con la lista). Sin esos datos cargados, el sistema sigue funcionando
        pero sin la vinculación automática — como hasta ahora.
+     - **Bug de datos encontrado y corregido (3 oct 2026):** las 22 filas de
+       `PROVEEDORES_LOCALES_PAGOS` tenían `proveedor_nombre` en null —
+       el INSERT de WF-09 nunca llenaba esa columna (el nombre real vive en
+       `cat_terceros.nombre` vía `nit_proveedor`, pero la columna
+       denormalizada quedaba vacía, lo que podía mostrar proveedores sin
+       nombre en cualquier vista de Lovable que lea `proveedor_nombre`
+       directo sin hacer el join). Corregido en el nodo
+       `Upsert PROVEEDORES_LOCALES_PAGOS` de `WF09_carga_compras_symphony_pg.json`:
+       ahora el INSERT y el UPDATE del upsert sacan el nombre con un
+       subselect a `cat_terceros` por NIT, así que queda sincronizado
+       automáticamente incluso si el nombre en el catálogo cambia después.
+       Las 22 filas existentes se corrigieron con un backfill directo en
+       Supabase. **Pendiente de Milena: reimportar WF-09 en n8n** para que
+       las compras nuevas de Symphony traigan el nombre desde ya.
+     - **Verificación pendiente (bloqueada por datos, no por código):**
+       intenté correr en vivo el caso real OC 16101 / Grupo Puma y encontré
+       que `BANCOS_MOV` no tiene movimientos más recientes al 6 jul 2026
+       (WF-04 necesita un extracto nuevo) y que la compra 16101 no existe
+       todavía en `COMPRAS_DETALLE` (pendiente de sync de Symphony/WF-09).
+       Ninguno de los dos es un bug de esta migración — son datos de origen
+       que faltan por cargar. La lógica del motor de WF-10 (identificación
+       por cuenta, 3 niveles de confianza, nómina, gasto sin soporte) se
+       validó de forma aislada con un script de prueba (4 escenarios,
+       todos correctos) mientras se consigue data real para probar en vivo.
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
