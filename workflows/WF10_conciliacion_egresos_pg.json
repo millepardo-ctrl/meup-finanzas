@@ -1,0 +1,570 @@
+{
+  "name": "MeUp WF-10 (Postgres) · Conciliación de egresos generales (Contabilidad)",
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "Cada 30 minutos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n2",
+      "name": "Leer comprobantes egresos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        220,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_doc as \"ID_DOC\", fecha_recibido as \"FECHA_RECIBIDO\", remitente_wa as \"REMITENTE_WA\",\n       ocr_valor as \"OCR_VALOR\", ocr_fecha_pago as \"OCR_FECHA_PAGO\", ocr_cliente as \"OCR_CLIENTE\",\n       ocr_referencia as \"OCR_REFERENCIA\", categoria_gasto as \"CATEGORIA_GASTO\", oc_num as \"OC_NUM\",\n       id_compra_informado as \"ID_COMPRA_INFORMADO\", url_drive as \"URL_DRIVE\", estado as \"ESTADO\"\nfrom comprobantes_wa\nwhere clasificacion = 'COMPROBANTE_EGRESO' and grupo_origen = 'CONTABILIDAD'\n  and estado in ('PROCESADO','SIN_MATCH');",
+        "options": {}
+      }
+    },
+    {
+      "id": "n3",
+      "name": "Leer BANCOS_MOV",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_mov as \"ID_MOV\", fecha as \"FECHA\", cuenta as \"CUENTA\", valor as \"VALOR\", tipo as \"TIPO\",\n       categoria as \"CATEGORIA\", detalle as \"DETALLE\", factura_oc as \"FACTURA_OC\", tercero as \"TERCERO\",\n       referencia as \"REFERENCIA\", descripcion as \"DESCRIPCION\", id_conciliacion as \"ID_CONCILIACION\"\nfrom bancos_mov;",
+        "options": {}
+      }
+    },
+    {
+      "id": "n4",
+      "name": "Leer TRANSPORTES_PAGOS",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_pago as \"ID_PAGO\", estado as \"ESTADO\", valor as \"VALOR\", pago_neto as \"PAGO_NETO\"\nfrom transportes_pagos\nwhere estado = 'PENDIENTE';",
+        "options": {}
+      }
+    },
+    {
+      "id": "n5",
+      "name": "Leer PROVEEDORES_LOCALES_PAGOS",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_control as \"ID_CONTROL\", id_compra as \"ID_COMPRA\", proveedor_nombre as \"PROVEEDOR_NOMBRE\",\n       valor_costo as \"VALOR_COSTO\", estado_pago as \"ESTADO_PAGO\"\nfrom proveedores_locales_pagos\nwhere estado_pago is distinct from 'PAGADO';",
+        "options": {}
+      }
+    },
+    {
+      "id": "n6",
+      "name": "Leer soportes (factura/OC)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id_doc as \"ID_DOC\", fecha_recibido as \"FECHA_RECIBIDO\", remitente_wa as \"REMITENTE_WA\",\n       ocr_valor as \"OCR_VALOR\", ocr_cliente as \"OCR_CLIENTE\", oc_num as \"OC_NUM\",\n       clasificacion as \"CLASIFICACION\", categoria_gasto as \"CATEGORIA_GASTO\", estado as \"ESTADO\"\nfrom comprobantes_wa\nwhere clasificacion in ('FACTURA','ORDEN_COMPRA') and estado in ('REVISAR','ARCHIVO','PROCESADO');",
+        "options": {}
+      }
+    },
+    {
+      "id": "n7",
+      "name": "Motor de conciliación de egresos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Motor de conciliación de EGRESOS GENERALES (grupo Contabilidad) — versión Postgres.\n// Cruza comprobantes de egreso del grupo Contabilidad contra movimientos bancarios negativos,\n// vincula factura/OC con su comprobante de pago cuando llegan por separado (ej: OC un día,\n// comprobante de pago dos días después), y marca PROVEEDORES_LOCALES_PAGOS cuando aplica.\nconst docs = (function(){ try { return $('Leer comprobantes egresos').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst movs = (function(){ try { return $('Leer BANCOS_MOV').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst tpagos = (function(){ try { return $('Leer TRANSPORTES_PAGOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst provs = (function(){ try { return $('Leer PROVEEDORES_LOCALES_PAGOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst soportes = (function(){ try { return $('Leer soportes (factura/OC)').all().map(i => i.json).filter(x => x && x.ID_DOC); } catch(e) { return []; } })();\nconst parseF = v => { if (!v) return null; if (v instanceof Date) return v;\n  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899,11,30) + Math.round(v)*86400000);\n  const s = String(v).trim();\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000); }\n  let m = s.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})/);\n  if (m) return new Date(m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0'));\n  const d2 = new Date(s.replace(' ', 'T')); return isNaN(d2) ? null : d2; };\nconst neto = p => { const v = parseFloat(p.PAGO_NETO); return isNaN(v) || !v ? parseFloat(p.VALOR) : v; };\nconst norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');\nconst out = [];\nfor (const d of docs) {\n  const val = parseFloat(d.OCR_VALOR);\n  if (!val) { if (d.ESTADO !== 'SIN_MATCH') out.push({ json: { accion: 'ERROR', doc: d, motivo: 'OCR sin valor' } }); continue; }\n  // Los soportes de transporte también pueden llegar a Contabilidad por error: si calza con un pago\n  // de transporte pendiente, es territorio de WF-08, no de este motor.\n  const esTransporte = tpagos.some(p => Math.abs(neto(p) - val) <= 1 || Math.abs(parseFloat(p.VALOR) - val) <= 1);\n  if (esTransporte || d.CATEGORIA_GASTO === 'TRANSPORTE') continue;\n  // Match contra egresos bancarios: valor exacto (±1), fecha ±3 días, sin conciliación previa\n  const fechaDoc = parseF(d.OCR_FECHA_PAGO);\n  let candidatos = movs.filter(m => {\n    if (m.ID_CONCILIACION) return false;\n    const mv = parseFloat(m.VALOR);\n    if (isNaN(mv) || mv >= 0) return false;\n    if (Math.abs(Math.abs(mv) - val) > 1) return false;\n    const fm = parseF(m.FECHA);\n    if (fechaDoc && fm) { const diff = Math.abs((fm - fechaDoc) / 86400000); if (diff > 3) return false; }\n    return true;\n  });\n  // Desempate por OC/ID en referencia del extracto, luego por nombre del beneficiario\n  if (candidatos.length > 1 && d.OC_NUM) {\n    const byOC = candidatos.filter(m => (String(m.REFERENCIA||'') + ' ' + String(m.DESCRIPCION||'')).includes(String(d.OC_NUM).replace(/\\D/g,'')));\n    if (byOC.length >= 1) candidatos = byOC;\n  }\n  if (candidatos.length > 1 && d.OCR_CLIENTE) {\n    const toks = norm(d.OCR_CLIENTE).split(' ').filter(w => w.length > 3);\n    const byName = candidatos.filter(m => toks.some(w => norm(m.DESCRIPCION + ' ' + m.TERCERO).includes(w)));\n    if (byName.length >= 1) candidatos = byName;\n  }\n  if (candidatos.length !== 1) {\n    if (candidatos.length === 0 && d.ESTADO === 'SIN_MATCH') continue; // reintento silencioso: el extracto llega al día siguiente\n    out.push({ json: { accion: candidatos.length === 0 ? 'SIN_MATCH' : 'AMBIGUO', doc: d, motivo: candidatos.length + ' movimientos candidatos' } });\n    continue;\n  }\n  // ¿Este egreso paga una compra a proveedor local? (por OC = ID_COMPRA y valor)\n  const oc = String(d.OC_NUM || d.ID_COMPRA_INFORMADO || '').replace(/\\D/g,'');\n  let provLocal = null;\n  if (oc) {\n    provLocal = provs.find(p => String(p.ID_COMPRA) === oc && p.ESTADO_PAGO !== 'PAGADO' && Math.abs(parseFloat(p.VALOR_COSTO) - val) <= Math.max(1, parseFloat(p.VALOR_COSTO) * 0.02));\n    if (!provLocal) provLocal = provs.find(p => String(p.ID_COMPRA) === oc && p.ESTADO_PAGO !== 'PAGADO'); // abono parcial\n  }\n  // ¿Llegó junto a una FACTURA o ORDEN DE COMPRA enviada por separado? 3 niveles de confianza decrecientes:\n  const tsDoc = (parseF(d.FECHA_RECIBIDO) || new Date()).getTime();\n  const difH = s2 => { const t2 = parseF(s2.FECHA_RECIBIDO); return t2 ? Math.abs(t2.getTime() - tsDoc) / 3600000 : 9999; };\n  const soporte =\n    soportes.find(s2 => oc && String(s2.OC_NUM || '').replace(/\\D/g, '') === oc && difH(s2) <= 168) || // misma OC: hasta 7 días, cualquier remitente\n    soportes.find(s2 => s2.REMITENTE_WA === d.REMITENTE_WA && s2.OCR_VALOR && String(s2.OCR_VALOR) === String(d.OCR_VALOR) && difH(s2) <= 24) || // mismo valor + remitente: 24 h\n    soportes.find(s2 => s2.OCR_VALOR && String(s2.OCR_VALOR) === String(d.OCR_VALOR) && difH(s2) <= 1) || null; // mismo valor, 1 h\n  const catFinal = (soporte && soporte.CLASIFICACION === 'ORDEN_COMPRA') ? 'COMPRA_PROVEEDOR' : (d.CATEGORIA_GASTO || (soporte && soporte.CATEGORIA_GASTO) || 'GASTO_GENERAL');\n  const tercFinal = (soporte && soporte.OCR_CLIENTE) || d.OCR_CLIENTE || '';\n  const ocFinal = (soporte && soporte.OC_NUM) || d.OC_NUM || '';\n  out.push({ json: { accion: 'MATCH', doc: d, mov: candidatos[0], provLocal: provLocal || null,\n    esAbonoProveedor: provLocal ? val < parseFloat(provLocal.VALOR_COSTO) - 1 : false, valor: val,\n    catFinal, tercFinal, ocFinal, soporte: soporte || null } });\n  if (soporte) out.push({ json: { accion: 'CERRAR_SOPORTE', soporteId: soporte.ID_DOC, pagoId: d.ID_DOC } });\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "n8",
+      "name": "¿Resultado?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        1540,
+        -120
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "MATCH",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "MATCH"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "CERRAR_SOPORTE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "SOPORTE"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "MATCH",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "PROBLEMA"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n9",
+      "name": "Categorizar movimiento bancario",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1780,
+        -260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update bancos_mov set categoria = $2::text, tercero = $3::text, factura_oc = $4::text,\n  detalle = $5::text, id_conciliacion = $6::text, updated_at = now()\nwhere id_mov = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [ $('Motor de conciliación de egresos').item.json.mov.ID_MOV, $('Motor de conciliación de egresos').item.json.catFinal, $('Motor de conciliación de egresos').item.json.tercFinal || $('Motor de conciliación de egresos').item.json.mov.TERCERO || '', $('Motor de conciliación de egresos').item.json.ocFinal || $('Motor de conciliación de egresos').item.json.mov.FACTURA_OC || '', (($('Motor de conciliación de egresos').item.json.ocFinal ? 'OC ' + $('Motor de conciliación de egresos').item.json.ocFinal + ' ' : '') + ($('Motor de conciliación de egresos').item.json.tercFinal || '') + ($('Motor de conciliación de egresos').item.json.soporte ? ' [' + $('Motor de conciliación de egresos').item.json.soporte.CLASIFICACION + ' ' + $('Motor de conciliación de egresos').item.json.soporte.ID_DOC + ']' : '')), $('Motor de conciliación de egresos').item.json.doc.ID_DOC ] }}"
+        }
+      }
+    },
+    {
+      "id": "n10",
+      "name": "Cerrar comprobante",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2000,
+        -260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa set id_mov_match = $2::text, estado = 'CONCILIADO_EGRESO',\n  human_review = 'PENDIENTE', updated_at = now()\nwhere id_doc = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [ $('Motor de conciliación de egresos').item.json.doc.ID_DOC, $('Motor de conciliación de egresos').item.json.mov.ID_MOV ] }}"
+        }
+      }
+    },
+    {
+      "id": "n11",
+      "name": "¿Paga una compra local?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2220,
+        -260
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "leftValue": "={{ $('Motor de conciliación de egresos').item.json.provLocal }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "notEmpty"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "n12",
+      "name": "Marcar pago a proveedor local",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2440,
+        -340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update proveedores_locales_pagos set estado_pago = $2::text, fecha_pago = nullif($3::text,'')::date,\n  cuenta_origen = $4::text, id_mov_banco = $5::text, notas = $6::text, updated_at = now()\nwhere id_control = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [ $('Motor de conciliación de egresos').item.json.provLocal.ID_CONTROL, ($('Motor de conciliación de egresos').item.json.esAbonoProveedor ? 'ABONADO' : 'PAGADO'), $('Motor de conciliación de egresos').item.json.doc.OCR_FECHA_PAGO, $('Motor de conciliación de egresos').item.json.mov.CUENTA, $('Motor de conciliación de egresos').item.json.mov.ID_MOV, ('Comprobante ' + $('Motor de conciliación de egresos').item.json.doc.ID_DOC + ($('Motor de conciliación de egresos').item.json.esAbonoProveedor ? ' (abono parcial de $' + $('Motor de conciliación de egresos').item.json.valor + ')' : '')) ] }}"
+        }
+      }
+    },
+    {
+      "id": "n13",
+      "name": "Confirmar a contabilidad",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2660,
+        -260
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      },
+      "parameters": {
+        "chatId": "-5559621779",
+        "text": "=✅ *Egreso conciliado*\\n{{ $('Motor de conciliación de egresos').item.json.doc.ID_DOC }} · {{ $('Motor de conciliación de egresos').item.json.doc.CATEGORIA_GASTO || 'GASTO_GENERAL' }}\\n${{ $('Motor de conciliación de egresos').item.json.valor }} → {{ $('Motor de conciliación de egresos').item.json.mov.CUENTA }}\\n{{ $('Motor de conciliación de egresos').item.json.provLocal ? 'Compra local ' + $('Motor de conciliación de egresos').item.json.provLocal.ID_COMPRA + ' marcada ' + ($('Motor de conciliación de egresos').item.json.esAbonoProveedor ? 'ABONADA' : 'PAGADA') : '' }}{{ $('Motor de conciliación de egresos').item.json.soporte ? '\\n🔗 Vinculado con ' + $('Motor de conciliación de egresos').item.json.soporte.CLASIFICACION + ' ' + $('Motor de conciliación de egresos').item.json.soporte.ID_DOC : '' }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "parseMode": "None",
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "n14",
+      "name": "Marcar problema",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1780,
+        80
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa set estado = $2::text, notas = $3::text, updated_at = now()\nwhere id_doc = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [ $json.doc.ID_DOC, $json.accion, $json.motivo ] }}"
+        }
+      }
+    },
+    {
+      "id": "n15",
+      "name": "Alertar problema",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        80
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REEMPLAZAR_CRED_TELEGRAM",
+          "name": "Telegram MeUp Bot"
+        }
+      },
+      "parameters": {
+        "chatId": "-5559621779",
+        "text": "=⚠️ Egreso sin conciliar\\n{{ $('Motor de conciliación de egresos').item.json.doc.ID_DOC }} · ${{ $('Motor de conciliación de egresos').item.json.doc.OCR_VALOR }} · {{ $('Motor de conciliación de egresos').item.json.doc.CATEGORIA_GASTO }}\\n{{ $('Motor de conciliación de egresos').item.json.motivo }}\\n{{ $('Motor de conciliación de egresos').item.json.doc.URL_DRIVE }}\\n(Si el extracto aún no se ha subido, se reintentará solo.)",
+        "additionalFields": {
+          "parseMode": "None",
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "n16",
+      "name": "Cerrar factura/OC vinculada",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1780,
+        280
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update comprobantes_wa set estado = 'SOPORTE_VINCULADO', id_mov_match = $2::text,\n  notas = $3::text, updated_at = now()\nwhere id_doc = $1::text;",
+        "options": {
+          "queryReplacement": "={{ [ $json.soporteId, $json.pagoId, 'Factura/OC vinculada al pago ' + $json.pagoId ] }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada 30 minutos": {
+      "main": [
+        [
+          {
+            "node": "Leer comprobantes egresos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer comprobantes egresos": {
+      "main": [
+        [
+          {
+            "node": "Leer BANCOS_MOV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer BANCOS_MOV": {
+      "main": [
+        [
+          {
+            "node": "Leer TRANSPORTES_PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer TRANSPORTES_PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Leer PROVEEDORES_LOCALES_PAGOS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer PROVEEDORES_LOCALES_PAGOS": {
+      "main": [
+        [
+          {
+            "node": "Leer soportes (factura/OC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer soportes (factura/OC)": {
+      "main": [
+        [
+          {
+            "node": "Motor de conciliación de egresos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Motor de conciliación de egresos": {
+      "main": [
+        [
+          {
+            "node": "¿Resultado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Resultado?": {
+      "main": [
+        [
+          {
+            "node": "Categorizar movimiento bancario",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Cerrar factura/OC vinculada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar problema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Categorizar movimiento bancario": {
+      "main": [
+        [
+          {
+            "node": "Cerrar comprobante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cerrar comprobante": {
+      "main": [
+        [
+          {
+            "node": "¿Paga una compra local?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Paga una compra local?": {
+      "main": [
+        [
+          {
+            "node": "Marcar pago a proveedor local",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Confirmar a contabilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar pago a proveedor local": {
+      "main": [
+        [
+          {
+            "node": "Confirmar a contabilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar problema": {
+      "main": [
+        [
+          {
+            "node": "Alertar problema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

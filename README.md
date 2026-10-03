@@ -25,6 +25,10 @@ Code, Opus u Codex sobre este repo debe partir de ahí.
   transporte) y WF-08 (pago transportista) migrados a Postgres y en producción.
   Las versiones Sheets equivalentes quedaron desactivadas en n8n y archivadas
   en `workflows/obsoletos/`
+- ⏳ WF-10 (conciliación de egresos generales — grupo Contabilidad) migrado a
+  Postgres (`WF10_conciliacion_egresos_pg.json`), pendiente de importar y
+  activar en n8n — la versión Sheets equivalente sigue activa hasta ese
+  momento
 - ⏳ Fase 4 — editor Lovable para contabilidad + dashboard: Comprobantes,
   Compras, Proveedores, Bancos, Catálogos, Transportes, Conciliación y
   Rentabilidad (`v_rentabilidad_compra`) ya conectados a datos reales; faltan

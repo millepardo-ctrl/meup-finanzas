@@ -162,19 +162,39 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
      (WF-08 solo escribe dinero cuando SÍ encuentra match), pero sí
      contaminaba el estado y consumía ciclos de revisión. Corregido
      agregando `and grupo_origen = 'LOGISTICA'` a la query (3 oct 2026).
-   - **Gap real encontrado, aún sin resolver:** `WF-10` (conciliación de
+   - **Gap encontrado y cerrado (3 oct 2026):** `WF-10` (conciliación de
      egresos generales del grupo CONTABILIDAD — vincula factura/OC con su
      comprobante de pago cuando llegan por separado, marca
      `PROVEEDORES_LOCALES_PAGOS` como pagado, categoriza `BANCOS_MOV`) nunca
-     se migró a Postgres y sigue leyendo el Google Sheet, que ya no recibe
-     escrituras desde que WF-01 migró. Está efectivamente desconectado desde
-     que cerró la Fase 3: ningún egreso de Contabilidad se vincula con su
-     soporte ni se marca como pagado automáticamente. Las 22 filas de
-     `proveedores_locales_pagos` en Postgres siguen en `PENDIENTE` sin
-     excepción. Pendiente decidir con Milena si se construye `WF10_pg`
-     (lógica ya diseñada y probada en la versión Sheets: 3 niveles de
-     confianza para vincular soporte↔pago — misma OC hasta 7 días, mismo
-     valor+remitente hasta 24h, mismo valor hasta 1h).
+     se había migrado a Postgres; seguía leyendo el Google Sheet, que ya no
+     recibía escrituras desde que WF-01 migró — estuvo efectivamente
+     desconectado desde que cerró esta fase. Migrado a `WF10_conciliacion_egresos_pg.json`,
+     misma lógica de 3 niveles de confianza de la versión Sheets (misma OC
+     hasta 7 días, mismo valor+remitente hasta 24h, mismo valor hasta 1h),
+     probada contra el caso real de producción (OC 16101 ↔ comprobante de
+     pago a Grupo Puma) antes de desplegar.
+     - **Bug de clasificación encontrado de paso, también corregido:** WF-01
+       nunca clasificaba un documento como `FACTURA` — una factura sin
+       transferencia (tipo_documento=FACTURA del OCR) caía en la rama
+       genérica de Contabilidad y quedaba como `COMPROBANTE_EGRESO` con
+       `ESTADO=REVISAR`, indistinguible de un comprobante de pago real y
+       nunca recogida como "soporte" por el motor de vinculación. Corregido
+       en `Parsear resultado OCR`: ahora `CLASIFICACION='FACTURA'`,
+       `ESTADO='ARCHIVO'` (igual que `ORDEN_COMPRA`), y el prompt de OCR
+       pide extraer proveedor + número de OC/pedido referenciado también
+       para facturas.
+     - **Limitación conocida de WF10_pg:** el nivel de confianza más fuerte
+       (misma OC, 7 días) solo vincula si el comprobante de pago trae el
+       número de OC/ID de compra — ya sea porque el OCR lo lee directo del
+       comprobante, o porque quien lo envía a Telegram lo escribe en el
+       caption (ej. "OC 16101"), igual que ya se hace en el grupo Pagos. Un
+       comprobante de transferencia bancaria normal casi nunca menciona la
+       OC por sí solo — **para que la vinculación automática funcione de
+       forma confiable, quien envía el comprobante a Contabilidad debe
+       escribir el número de OC/ID en el mensaje.** Sin eso, el egreso
+       igual se concilia contra el banco (no se pierde), pero no se vincula
+       automáticamente con su factura/OC ni marca el proveedor como pagado
+       — queda para revisión manual.
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
