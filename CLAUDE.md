@@ -154,6 +154,27 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
    - Bug de producción encontrado y corregido tras activar: el patrón anti-bug
      #9 (nodos Postgres de escritura no hacen echo del input) rompía las
      alertas de Telegram de los 3 flujos — corregido en los JSON vigentes.
+   - **WF-08 tomaba por error comprobantes del grupo CONTABILIDAD** (facturas,
+     OC, arriendo, nómina, anticipos) porque su query de lectura filtraba solo
+     por `clasificacion = 'COMPROBANTE_EGRESO'`, sin filtrar `grupo_origen`.
+     Los marcaba `SIN_MATCH`/`AMBIGUO` al no encontrar nada en
+     `TRANSPORTES_PAGOS` (no pagan transporte). No llegó a duplicar pagos
+     (WF-08 solo escribe dinero cuando SÍ encuentra match), pero sí
+     contaminaba el estado y consumía ciclos de revisión. Corregido
+     agregando `and grupo_origen = 'LOGISTICA'` a la query (3 oct 2026).
+   - **Gap real encontrado, aún sin resolver:** `WF-10` (conciliación de
+     egresos generales del grupo CONTABILIDAD — vincula factura/OC con su
+     comprobante de pago cuando llegan por separado, marca
+     `PROVEEDORES_LOCALES_PAGOS` como pagado, categoriza `BANCOS_MOV`) nunca
+     se migró a Postgres y sigue leyendo el Google Sheet, que ya no recibe
+     escrituras desde que WF-01 migró. Está efectivamente desconectado desde
+     que cerró la Fase 3: ningún egreso de Contabilidad se vincula con su
+     soporte ni se marca como pagado automáticamente. Las 22 filas de
+     `proveedores_locales_pagos` en Postgres siguen en `PENDIENTE` sin
+     excepción. Pendiente decidir con Milena si se construye `WF10_pg`
+     (lógica ya diseñada y probada en la versión Sheets: 3 niveles de
+     confianza para vincular soporte↔pago — misma OC hasta 7 días, mismo
+     valor+remitente hasta 24h, mismo valor hasta 1h).
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,

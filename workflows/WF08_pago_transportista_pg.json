@@ -24,7 +24,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "select id_doc as \"ID_DOC\", ocr_valor as \"OCR_VALOR\", ocr_fecha_pago as \"OCR_FECHA_PAGO\",\n       ocr_referencia as \"OCR_REFERENCIA\", ocr_cliente as \"OCR_CLIENTE\", url_drive as \"URL_DRIVE\",\n       clasificacion as \"CLASIFICACION\", estado as \"ESTADO\"\nfrom comprobantes_wa\nwhere clasificacion = 'COMPROBANTE_EGRESO' and estado in ('PROCESADO','SIN_MATCH','REVISAR');",
+        "query": "select id_doc as \"ID_DOC\", ocr_valor as \"OCR_VALOR\", ocr_fecha_pago as \"OCR_FECHA_PAGO\",\n       ocr_referencia as \"OCR_REFERENCIA\", ocr_cliente as \"OCR_CLIENTE\", url_drive as \"URL_DRIVE\",\n       clasificacion as \"CLASIFICACION\", estado as \"ESTADO\"\nfrom comprobantes_wa\nwhere clasificacion = 'COMPROBANTE_EGRESO' and grupo_origen = 'LOGISTICA'\n  and estado in ('PROCESADO','SIN_MATCH','REVISAR');",
         "options": {}
       },
       "id": "n2",
