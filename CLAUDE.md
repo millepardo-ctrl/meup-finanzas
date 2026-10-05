@@ -352,8 +352,25 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        Corregido marcando `executeOnce: true` en ambos nodos (ninguno
        depende del item que recibe: uno descarga siempre el mismo
        archivo, el otro hace un SELECT sin filtro por fila).
-       **Pendiente de Milena: reimportar WF-04 una vez más (quinto fix)
-       y volver a probar con el archivo real.**
+       **Falló por sexta vez en producción (5 oct 2026), corregido:** con
+       `executeOnce` aplicado, la captura de Milena confirmó que los
+       conteos de items ya quedaron correctos (`Leer sin encabezado
+       (plano)`: 112, `Leer CAT_BANCOS`: 6 — la explosión quedó resuelta),
+       pero el mismo error de "nombre de archivo" persistió. Eso descarta
+       la explosión de items como causa restante: el esquema de claves
+       que entrega n8n para este nodo (`operation: "xlsx"`,
+       `headerRow:false`) simplemente no es `"0".."9"` como asumí
+       (probablemente usa otro esquema interno, p.ej. letras de columna).
+       En vez de seguir adivinando el nombre exacto de clave contra
+       producción, `col()` ahora cae a lectura posicional real vía
+       `Object.values(row)[idx]` cuando no encuentra la clave numérica
+       esperada — el orden de propiedades de un objeto en JS sigue el
+       orden de inserción (el orden real de columnas del archivo), así
+       que funciona sin importar qué nombre de clave use n8n
+       internamente. Probado localmente simulando tanto claves `"0".."9"`
+       como claves tipo letra (A, B, C...): 402/402 filas en ambos casos.
+       **Pendiente de Milena: reimportar WF-04 una vez más (sexto fix) y
+       volver a probar con el archivo real.**
        Los formatos con
        encabezado real (otros bancos) siguen funcionando igual que antes, sin
        ningún cambio. Si BC-AHO-8985 o BC-PAN-USD (también Bancolombia)
