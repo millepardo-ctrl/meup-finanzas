@@ -369,8 +369,27 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        que funciona sin importar qué nombre de clave use n8n
        internamente. Probado localmente simulando tanto claves `"0".."9"`
        como claves tipo letra (A, B, C...): 402/402 filas en ambos casos.
-       **Pendiente de Milena: reimportar WF-04 una vez más (sexto fix) y
-       volver a probar con el archivo real.**
+       **Falló por séptima vez en producción (5 oct 2026), MISMO mensaje
+       exacto de error, incluso con los conteos de items ya correctos
+       (112/6, confirmado por Milena).** Un error idéntico letra por
+       letra después de dos fixes de código distintos (executeOnce +
+       col() posicional) ya no es informativo por sí solo — no hay forma
+       de saber desde aquí si el código se reimportó de verdad con cada
+       fix o si el problema real es otro. En vez de seguir iterando a
+       ciegas sobre captura tras captura, se cambió el enfoque: si `Leer
+       sin encabezado (plano)` SÍ trae filas pero ninguna calza con el
+       patrón esperado (fecha AAAAMMDD en posición 3, valor numérico en
+       posición 5), ahora se lanza un error de **diagnóstico explícito**
+       que muestra las claves y valores reales de la primera fila, en
+       vez de caer en silencio a la rama de Formato A (que da el mensaje
+       engañoso de "nombre de archivo" sin importar la causa real).
+       **Pendiente de Milena: reimportar WF-04 una vez más (séptimo fix)
+       y volver a probar.** Si el error sigue siendo sobre "nombre de
+       archivo" después de esto, es señal de que el reimport no está
+       tomando el cambio (revisar que WF-04 se reemplace por completo,
+       no se fusione con la versión anterior); si cambia al mensaje de
+       "DIAGNOSTICO formato plano: ...", esa salida da la respuesta
+       definitiva de una sola vez.
        Los formatos con
        encabezado real (otros bancos) siguen funcionando igual que antes, sin
        ningún cambio. Si BC-AHO-8985 o BC-PAN-USD (también Bancolombia)
