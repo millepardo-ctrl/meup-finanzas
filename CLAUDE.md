@@ -282,15 +282,11 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        llegan en este mismo formato plano, falta registrar su respectivo
        `cat_bancos.numero` — en cuanto llegue el primer archivo de cada una
        lo reviso y lo cargo igual que con la 762.
-       **Observación sin resolver, no accionada:** varias filas "PAGO DE PROV
-       `<nombre>`" llegan con valor **positivo** (ej. "PAGO DE PROV GRUPO
-       PUMA" +$X) — no parece ser un pago que MeUp hace, sino un cobro que
-       MeUp recibe a través de la red de pagos a proveedores de Bancolombia
-       (alguien le paga a MeUp usando ese servicio). El clasificador no tiene
-       regla para esto todavía (`clasificar()`) y cae en `INGRESO
-       POR_CLASIFICAR` genérico — no se tocó porque es una decisión de
-       negocio, no un bug; confirmar con Milena antes de automatizar esa
-       categoría.
+       **Confirmado por Milena (5 oct 2026):** las filas "PAGO DE PROV
+       `<nombre>`" con valor **positivo** son reintegros/ajustes de un
+       proveedor (envío fallido, cancelación de pedido, etc.), no un pago
+       saliente. Agregada la regla en `clasificar()`:
+       `PAGO DE PROV` + valor > 0 → `INGRESO / REINTEGRO_PROVEEDOR`.
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
