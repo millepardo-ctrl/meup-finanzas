@@ -100,6 +100,21 @@ Diccionario de columnas exacto (heredado de Sheets, ahora también en Postgres):
    donde nació el dato), nunca `$json.CAMPO` a secas. Los nodos IF/Switch sí preservan
    el pass-through correctamente — el problema es exclusivo de los nodos Postgres de
    escritura.
+10. **Un nodo sin `executeOnce: true` se ejecuta una vez POR CADA item que reciba del
+    nodo anterior**, incluso si su lógica no depende de ese item (una descarga de un
+    archivo fijo, un SELECT sin parámetros). Si ese nodo está encadenado después de un
+    nodo con muchos items, el resultado se multiplica en cascada: un nodo de descarga
+    con 111 items de entrada produce 111 descargas del mismo archivo; el siguiente nodo
+    que lea esos binarios corre 111 veces más; un lookup a Postgres más adelante corre
+    aún más veces. Encontrado en producción en WF-04 (5 oct 2026): `Descargar archivo
+    (plano)` encadenado después de `Leer CSV/XLSX` (111 items) se ejecutó 111 veces,
+    `Leer sin encabezado (plano)` terminó con 12.432 items (111×~112), y `Leer
+    CAT_BANCOS` con 74.592 (12.432×6) — la explosión de datos duplicados corrompía la
+    detección de formato en el Code node siguiente, y de paso machacaba Supabase con
+    miles de consultas repetidas. **Regla:** cualquier nodo que descargue/consulte algo
+    que NO varía por item (un archivo fijo, una tabla de catálogo sin filtro por fila)
+    debe marcarse `executeOnce: true`, sin importar cuántos items traiga el nodo
+    anterior en la cadena.
 
 ## Estructura del repo
 
@@ -325,7 +340,19 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        con su propio soporte de `headerRow`. Como el archivo real sí es
        xlsx, fijar `operation: "xlsx"` no lo rechaza (a diferencia de
        forzar `"csv"`) y sí aplica `headerRow:false` correctamente.
-       **Pendiente de Milena: reimportar WF-04 una vez más (cuarto fix)
+       **Falló por quinta vez en producción (5 oct 2026), corregido:**
+       mismo error de siempre, pero la captura del canvas reveló la
+       causa real (ver patrón anti-bug #10): sin `executeOnce`,
+       `Descargar archivo (plano)` corría una vez por cada uno de los
+       111 items que entregaba `Leer CSV/XLSX`, y `Leer CAT_BANCOS`
+       heredaba la misma multiplicación — la cadena terminaba con
+       12.432 items en `Leer sin encabezado (plano)` y 74.592 en `Leer
+       CAT_BANCOS`, en vez de ~112 y 6. Esa explosión de datos
+       duplicados corrompía la detección de formato en el Code node.
+       Corregido marcando `executeOnce: true` en ambos nodos (ninguno
+       depende del item que recibe: uno descarga siempre el mismo
+       archivo, el otro hace un SELECT sin filtro por fila).
+       **Pendiente de Milena: reimportar WF-04 una vez más (quinto fix)
        y volver a probar con el archivo real.**
        Los formatos con
        encabezado real (otros bancos) siguen funcionando igual que antes, sin
