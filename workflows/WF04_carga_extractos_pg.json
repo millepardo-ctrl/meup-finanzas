@@ -95,7 +95,8 @@
           "id": "REEMPLAZAR_CRED_GDRIVE",
           "name": "Google Drive MeUp"
         }
-      }
+      },
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -135,7 +136,8 @@
           "name": "Supabase MeUp Finanzas"
         }
       },
-      "alwaysOutputData": true
+      "alwaysOutputData": true,
+      "executeOnce": true
     },
     {
       "parameters": {
