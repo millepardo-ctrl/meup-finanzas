@@ -78,7 +78,7 @@
         "fileId": {
           "__rl": true,
           "mode": "id",
-          "value": "={{ $json.id }}"
+          "value": "={{ $('Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)').first().json.id }}"
         },
         "options": {}
       },
