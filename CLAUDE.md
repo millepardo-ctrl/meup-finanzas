@@ -312,8 +312,21 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        referencia `$('...')` dentro del Code node). Vuelto a probar en
        local: 402/402 filas, `NOMINA` (3) y `REINTEGRO_PROVEEDOR` (13)
        correctos.
-       **Pendiente de Milena: reimportar WF-04 una vez más (con este
-       tercer fix) y volver a probar con el archivo real.**
+       **Falló por cuarta vez en producción (5 oct 2026), corregido:**
+       sin el error de "not in csv format", pero reapareció el mismo
+       error de las primeras dos fallas ("El nombre del archivo debe
+       incluir..."). Causa: al quitar la operación explícita, el nodo
+       quedó en modo autodetect, que para este archivo sigue tomando la
+       fila 1 como encabezado real (con los valores de esa fila como
+       nombres de columna) sin respetar `headerRow:false` — confirmado
+       en una captura de Milena del panel de salida del nodo, donde las
+       "claves" eran valores de datos en vez de `"0".."9"`. n8n expone
+       una operación `xlsx` específica (distinta de `xls` y de `csv`),
+       con su propio soporte de `headerRow`. Como el archivo real sí es
+       xlsx, fijar `operation: "xlsx"` no lo rechaza (a diferencia de
+       forzar `"csv"`) y sí aplica `headerRow:false` correctamente.
+       **Pendiente de Milena: reimportar WF-04 una vez más (cuarto fix)
+       y volver a probar con el archivo real.**
        Los formatos con
        encabezado real (otros bancos) siguen funcionando igual que antes, sin
        ningún cambio. Si BC-AHO-8985 o BC-PAN-USD (también Bancolombia)
