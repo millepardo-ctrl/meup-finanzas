@@ -74,6 +74,49 @@
     },
     {
       "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {}
+      },
+      "id": "n2b",
+      "name": "Descargar archivo (plano)",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        550,
+        120
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REEMPLAZAR_CRED_GDRIVE",
+          "name": "Google Drive MeUp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "csv",
+        "options": {
+          "headerRow": false
+        }
+      },
+      "id": "n2c",
+      "name": "Leer CSV sin encabezado (plano)",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        770,
+        120
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
         "query": "select codigo, numero, moneda from cat_bancos where activa = true;",
         "options": {}
@@ -83,7 +126,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        550,
+        990,
         0
       ],
       "credentials": {
@@ -96,14 +139,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normalizador multi-banco -> esquema BANCOS_MOV (v4)\n// Soporta dos formatos de origen:\n//  A) Archivo CON encabezado real en texto (ej. \"Fecha\", \"Descripcion\", \"Valor\")\n//     -- la cuenta se identifica por el NOMBRE DEL ARCHIVO (patron de siempre,\n//     ej. BC-AHO-8985_2026-07.xlsx). Se lee via 'Leer CSV/XLSX'.\n//  B) \"Extracto plano\" de Bancolombia SIN encabezado, 10 columnas fijas:\n//     cuenta_raw, oficina, _, fecha AAAAMMDD, _, valor, codigo_operacion,\n//     descripcion, estado, _ -- NO requiere renombrar el archivo: la cuenta\n//     se identifica buscando cuenta_raw en CAT_BANCOS.numero.\n//     Para este formato se lee el CSV crudo directo del binario descargado\n//     (no via 'Leer CSV/XLSX'): ese nodo trata la fila 1 como encabezado,\n//     y como varias columnas de este extracto vienen vacias, los nombres de\n//     columna que generaria chocarian entre si (todas las \"\" se pisan) y se\n//     perderia informacion -- parsear el texto crudo evita ese problema.\n\nconst catBancos = $('Leer CAT_BANCOS').all().map(i => i.json);\n\nfunction parseValor(v) {\n  if (typeof v === 'number') return v;\n  let s = String(v || '').replace(/[A-Za-z$\\s ]/g, '');\n  if (/,\\d{1,2}$/.test(s)) s = s.replace(/\\./g, '').replace(',', '.');\n  else s = s.replace(/,/g, '');\n  const n = parseFloat(s);\n  return isNaN(n) ? 0 : n;\n}\nfunction parseFecha(v) {\n  if (v instanceof Date) return v.toISOString().slice(0,10);\n  const s = String(v || '').trim();\n  if (/^\\d{8}$/.test(s)) return s.slice(0,4) + '-' + s.slice(4,6) + '-' + s.slice(6,8); // AAAAMMDD (extracto plano Bancolombia)\n  if (typeof v === 'number' && v > 20000 && v < 80000) {\n    return new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000).toISOString().slice(0,10);\n  }\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000).toISOString().slice(0,10); }\n  let m = s.match(/^(\\d{4})[-\\/](\\d{1,2})[-\\/](\\d{1,2})/);\n  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');\n  m = s.match(/^(\\d{1,2})[-\\/](\\d{1,2})[-\\/](\\d{4})/);\n  if (m) return m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');\n  return s.slice(0,10);\n}\nfunction pick(row, patterns) {\n  for (const pat of patterns) {\n    for (const k of Object.keys(row)) {\n      if (pat.test(k)) return row[k];\n    }\n  }\n  return '';\n}\nfunction clasificar(desc, valor, refTexto) {\n  const d = String(desc || '').toUpperCase();\n  if (d.includes('4X1000') || d.includes('IMPTO GOBIERNO')) return ['IMPUESTO', '4X1000'];\n  if (d.includes('ABONO INTERESES')) return ['INGRESO', 'INTERES_GANADO'];\n  if (d.includes('PRESTAMO') || d.includes('PAGOPTMO')) return ['EGRESO', 'PAGO_CREDITO'];\n  if (d.includes('INTERES')) return ['EGRESO', 'INTERES_CREDITO'];\n  if (d.includes('COMISION') || d.includes('CUOTA MANEJO') || d.includes('IVA COMIS') || d.includes('SWIFT') || d.includes('FEE COLLEC') || d.includes('COBRO MENSUAL')) return ['GASTO_BANCARIO', 'COMISION'];\n  if ((d.includes('TRANSFERENCIA CTA SUC') || d.includes('TRASLADO')) && /(3762|8985|4335|6614|9030|3826)/.test(d + ' ' + String(refTexto || ''))) return ['TRASLADO', 'TRASLADO_INTERNO'];\n  if (d.includes('NOMIN') || d.includes('SALARIO')) return ['EGRESO', 'NOMINA']; // cubre \"PAGO A NOMIN <nombre truncado>\" del extracto plano\n  if (d.includes('GOOGLE') || d.includes('ADS') || d.includes('META PLATFORMS')) return ['EGRESO', 'PUBLICIDAD'];\n  if (d.includes('PAGO PSE') && valor < 0) return ['EGRESO', 'PAGO_PROVEEDOR'];\n  if ((d.includes('DESDE NEQUI') || d.includes('PAGO LLAVE') || d.includes('CONSIGNACION')) && valor > 0) return ['INGRESO', 'VENTA'];\n  if (d.includes('TRANSFERENCIA EXT DE') && valor > 0) return ['INGRESO', 'TRANSFERENCIA_INTL'];\n  if (valor > 0) return ['INGRESO', 'POR_CLASIFICAR'];\n  return ['EGRESO', 'POR_CLASIFICAR'];\n}\n\nfunction splitCsvLine(line) {\n  // separador simple por coma -- este formato bancario no usa comillas/comas dentro de campos\n  return line.split(',').map(c => c.trim());\n}\nfunction leerCsvCrudo() {\n  try {\n    const bin = $('Descargar archivo').first().binary;\n    if (!bin || !bin.data || !bin.data.data) return null;\n    const texto = Buffer.from(bin.data.data, 'base64').toString('utf8');\n    if (texto.slice(0, 2) === 'PK' || texto.includes('\\u0000')) return null; // xlsx es zip binario, no texto plano\n    return texto;\n  } catch (e) { return null; }\n}\n\nconst rawText = leerCsvCrudo();\nlet planoLineas = null;\nif (rawText) {\n  const lineas = rawText.split(/\\r?\\n/).filter(l => l.trim().length > 0).map(splitCsvLine);\n  if (lineas.length && lineas[0].length >= 8 && /^\\d{8}$/.test(lineas[0][3] || '') && /^-?\\d+(\\.\\d+)?$/.test(lineas[0][5] || '')) {\n    planoLineas = lineas;\n  }\n}\n\nlet seq = Date.now();\nconst out = [];\n\nif (planoLineas) {\n  for (const vals of planoLineas) {\n    const cuentaRaw = String(vals[0] || '').trim();\n    const fechaRaw = vals[3];\n    const valorRaw = vals[5];\n    const codigoOp = String(vals[6] || '').trim();\n    const desc = vals[7];\n    if (!cuentaRaw || !desc) continue;\n    const banco = catBancos.find(b => String(b.numero || '').trim() === cuentaRaw);\n    if (!banco) {\n      throw new Error('Cuenta \"' + cuentaRaw + '\" no esta registrada en CAT_BANCOS.numero -- agregala para la cuenta correcta antes de reintentar esta carga.');\n    }\n    const valor = parseValor(valorRaw);\n    const [tipo, cat] = clasificar(desc, valor, codigoOp);\n    out.push({ json: {\n      id_mov: 'MOV-' + (seq++).toString().slice(-9),\n      fecha: parseFecha(fechaRaw),\n      cuenta: banco.codigo,\n      descripcion: String(desc).trim(),\n      referencia: codigoOp,\n      moneda: banco.moneda || 'COP',\n      valor: valor,\n      tipo: tipo,\n      categoria: cat\n    }});\n  }\n} else {\n  const rawRows = $('Leer CSV/XLSX').all().map(i => i.json);\n  const filename = $('Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)').first().json.name || '';\n  const cuentaMatch = filename.match(/(BC-CTE-3762|BC-AHO-8985|DV-AHO-4335|DV-CTE-6614|BA-9030|BC-PAN-USD)/i);\n  if (!cuentaMatch) throw new Error('El nombre del archivo debe incluir el codigo de cuenta de CAT_BANCOS. Ej: BC-CTE-3762_2026-07.xlsx o BC-PAN-USD_junio.xlsx');\n  const cuenta = cuentaMatch[1].toUpperCase();\n  const moneda = cuenta === 'BC-PAN-USD' ? 'USD' : 'COP';\n  for (const r of rawRows) {\n    const fechaRaw = pick(r, [/^fecha( aplicaci)?/i, /^fecha$/i]);\n    const desc = pick(r, [/descrip/i]);\n    const valorRaw = pick(r, [/^valor$/i, /valor/i]);\n    if (!desc && !valorRaw) continue;\n    const ref1 = pick(r, [/referencia 1/i, /n[uu]mero de la transacci/i, /^referencia$/i]);\n    const ref2 = pick(r, [/referencia 2/i]);\n    const valor = parseValor(valorRaw);\n    if (valor === 0 && !desc) continue;\n    const [tipo, cat] = clasificar(desc, valor, [ref1, ref2].join(' '));\n    out.push({ json: {\n      id_mov: 'MOV-' + (seq++).toString().slice(-9),\n      fecha: parseFecha(fechaRaw),\n      cuenta: cuenta,\n      descripcion: String(desc).trim(),\n      referencia: [ref1, ref2].map(x => String(x || '').trim()).filter(x => x && x !== '- -' && x !== '--').join(' | '),\n      moneda: moneda,\n      valor: valor,\n      tipo: tipo,\n      categoria: cat\n    }});\n  }\n}\n\nif (out.length === 0) throw new Error('El archivo no produjo movimientos: revisar el formato (extracto plano sin encabezado, o encabezados reales con nombre de archivo correcto).');\nreturn out;"
+        "jsCode": "// Normalizador multi-banco -> esquema BANCOS_MOV (v5)\n// Soporta dos formatos de origen:\n//  A) Archivo CON encabezado real en texto (ej. \"Fecha\", \"Descripcion\", \"Valor\")\n//     -- la cuenta se identifica por el NOMBRE DEL ARCHIVO (patron de siempre,\n//     ej. BC-AHO-8985_2026-07.xlsx). Se lee via 'Leer CSV/XLSX'.\n//  B) \"Extracto plano\" de Bancolombia SIN encabezado, 10 columnas fijas:\n//     cuenta_raw, oficina, _, fecha AAAAMMDD, _, valor, codigo_operacion,\n//     descripcion, estado, _ -- NO requiere renombrar el archivo: la cuenta\n//     se identifica buscando cuenta_raw en CAT_BANCOS.numero.\n//     Para este formato se usa un segundo nodo 'Leer CSV sin encabezado\n//     (plano)' (extractFromFile con headerRow=false) sobre una segunda\n//     descarga del mismo archivo: con headerRow=false n8n entrega cada fila\n//     con claves posicionales \"0\"..\"9\", sin inventarse nombres de columna\n//     -- evita el problema de intentar leer el binario a mano (rompe si\n//     n8n guarda binarios en filesystem en vez de memoria) y evita que\n//     las columnas vacias de este extracto colisionen entre si si se\n//     intentara reconstruir la fila de encabezado de 'Leer CSV/XLSX'.\n\nconst catBancos = $('Leer CAT_BANCOS').all().map(i => i.json);\n\nfunction parseValor(v) {\n  if (typeof v === 'number') return v;\n  let s = String(v || '').replace(/[A-Za-z$\\s ]/g, '');\n  if (/,\\d{1,2}$/.test(s)) s = s.replace(/\\./g, '').replace(',', '.');\n  else s = s.replace(/,/g, '');\n  const n = parseFloat(s);\n  return isNaN(n) ? 0 : n;\n}\nfunction parseFecha(v) {\n  if (v instanceof Date) return v.toISOString().slice(0,10);\n  const s = String(v || '').trim();\n  if (/^\\d{8}$/.test(s)) return s.slice(0,4) + '-' + s.slice(4,6) + '-' + s.slice(6,8); // AAAAMMDD (extracto plano Bancolombia)\n  if (typeof v === 'number' && v > 20000 && v < 80000) {\n    return new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000).toISOString().slice(0,10);\n  }\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000).toISOString().slice(0,10); }\n  let m = s.match(/^(\\d{4})[-\\/](\\d{1,2})[-\\/](\\d{1,2})/);\n  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');\n  m = s.match(/^(\\d{1,2})[-\\/](\\d{1,2})[-\\/](\\d{4})/);\n  if (m) return m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');\n  return s.slice(0,10);\n}\nfunction pick(row, patterns) {\n  for (const pat of patterns) {\n    for (const k of Object.keys(row)) {\n      if (pat.test(k)) return row[k];\n    }\n  }\n  return '';\n}\nfunction clasificar(desc, valor, refTexto) {\n  const d = String(desc || '').toUpperCase();\n  if (d.includes('4X1000') || d.includes('IMPTO GOBIERNO')) return ['IMPUESTO', '4X1000'];\n  if (d.includes('ABONO INTERESES')) return ['INGRESO', 'INTERES_GANADO'];\n  if (d.includes('PRESTAMO') || d.includes('PAGOPTMO')) return ['EGRESO', 'PAGO_CREDITO'];\n  if (d.includes('INTERES')) return ['EGRESO', 'INTERES_CREDITO'];\n  if (d.includes('COMISION') || d.includes('CUOTA MANEJO') || d.includes('IVA COMIS') || d.includes('SWIFT') || d.includes('FEE COLLEC') || d.includes('COBRO MENSUAL')) return ['GASTO_BANCARIO', 'COMISION'];\n  if ((d.includes('TRANSFERENCIA CTA SUC') || d.includes('TRASLADO')) && /(3762|8985|4335|6614|9030|3826)/.test(d + ' ' + String(refTexto || ''))) return ['TRASLADO', 'TRASLADO_INTERNO'];\n  if (d.includes('NOMIN') || d.includes('SALARIO')) return ['EGRESO', 'NOMINA']; // cubre \"PAGO A NOMIN <nombre truncado>\" del extracto plano\n  if (d.includes('GOOGLE') || d.includes('ADS') || d.includes('META PLATFORMS')) return ['EGRESO', 'PUBLICIDAD'];\n  if (d.includes('PAGO PSE') && valor < 0) return ['EGRESO', 'PAGO_PROVEEDOR'];\n  if ((d.includes('DESDE NEQUI') || d.includes('PAGO LLAVE') || d.includes('CONSIGNACION')) && valor > 0) return ['INGRESO', 'VENTA'];\n  if (d.includes('TRANSFERENCIA EXT DE') && valor > 0) return ['INGRESO', 'TRANSFERENCIA_INTL'];\n  if (valor > 0) return ['INGRESO', 'POR_CLASIFICAR'];\n  return ['EGRESO', 'POR_CLASIFICAR'];\n}\nfunction col(row, idx) {\n  if (row == null) return '';\n  if (row[idx] !== undefined) return row[idx];\n  if (row[String(idx)] !== undefined) return row[String(idx)];\n  return '';\n}\n\nconst filasPlanoRaw = (function () {\n  try { return $('Leer CSV sin encabezado (plano)').all().map(i => i.json); } catch (e) { return []; }\n})();\nconst esPlano = filasPlanoRaw.length > 0\n  && /^\\d{8}$/.test(String(col(filasPlanoRaw[0], 3) || '').trim())\n  && /^-?\\d+(\\.\\d+)?$/.test(String(col(filasPlanoRaw[0], 5) || '').trim());\n\nlet seq = Date.now();\nconst out = [];\n\nif (esPlano) {\n  for (const row of filasPlanoRaw) {\n    const cuentaRaw = String(col(row, 0) || '').trim();\n    const fechaRaw = col(row, 3);\n    const valorRaw = col(row, 5);\n    const codigoOp = String(col(row, 6) || '').trim();\n    const desc = col(row, 7);\n    if (!cuentaRaw || !desc) continue;\n    const banco = catBancos.find(b => String(b.numero || '').trim() === cuentaRaw);\n    if (!banco) {\n      throw new Error('Cuenta \"' + cuentaRaw + '\" no esta registrada en CAT_BANCOS.numero -- agregala para la cuenta correcta antes de reintentar esta carga.');\n    }\n    const valor = parseValor(valorRaw);\n    const [tipo, cat] = clasificar(desc, valor, codigoOp);\n    out.push({ json: {\n      id_mov: 'MOV-' + (seq++).toString().slice(-9),\n      fecha: parseFecha(fechaRaw),\n      cuenta: banco.codigo,\n      descripcion: String(desc).trim(),\n      referencia: codigoOp,\n      moneda: banco.moneda || 'COP',\n      valor: valor,\n      tipo: tipo,\n      categoria: cat\n    }});\n  }\n} else {\n  const rawRows = $('Leer CSV/XLSX').all().map(i => i.json);\n  const filename = $('Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)').first().json.name || '';\n  const cuentaMatch = filename.match(/(BC-CTE-3762|BC-AHO-8985|DV-AHO-4335|DV-CTE-6614|BA-9030|BC-PAN-USD)/i);\n  if (!cuentaMatch) throw new Error('El nombre del archivo debe incluir el codigo de cuenta de CAT_BANCOS. Ej: BC-CTE-3762_2026-07.xlsx o BC-PAN-USD_junio.xlsx');\n  const cuenta = cuentaMatch[1].toUpperCase();\n  const moneda = cuenta === 'BC-PAN-USD' ? 'USD' : 'COP';\n  for (const r of rawRows) {\n    const fechaRaw = pick(r, [/^fecha( aplicaci)?/i, /^fecha$/i]);\n    const desc = pick(r, [/descrip/i]);\n    const valorRaw = pick(r, [/^valor$/i, /valor/i]);\n    if (!desc && !valorRaw) continue;\n    const ref1 = pick(r, [/referencia 1/i, /n[uu]mero de la transacci/i, /^referencia$/i]);\n    const ref2 = pick(r, [/referencia 2/i]);\n    const valor = parseValor(valorRaw);\n    if (valor === 0 && !desc) continue;\n    const [tipo, cat] = clasificar(desc, valor, [ref1, ref2].join(' '));\n    out.push({ json: {\n      id_mov: 'MOV-' + (seq++).toString().slice(-9),\n      fecha: parseFecha(fechaRaw),\n      cuenta: cuenta,\n      descripcion: String(desc).trim(),\n      referencia: [ref1, ref2].map(x => String(x || '').trim()).filter(x => x && x !== '- -' && x !== '--').join(' | '),\n      moneda: moneda,\n      valor: valor,\n      tipo: tipo,\n      categoria: cat\n    }});\n  }\n}\n\nif (out.length === 0) throw new Error('El archivo no produjo movimientos: revisar el formato (extracto plano sin encabezado, o encabezados reales con nombre de archivo correcto).');\nreturn out;"
       },
       "id": "n4",
       "name": "Normalizar a esquema BANCOS_MOV",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
+        1320,
         0
       ]
     },
@@ -120,7 +163,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        1100,
+        1540,
         0
       ],
       "credentials": {
@@ -140,7 +183,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1320,
+        1760,
         0
       ]
     },
@@ -168,7 +211,7 @@
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
-        1540,
+        1980,
         0
       ],
       "credentials": {
@@ -192,7 +235,7 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        1760,
+        2200,
         0
       ],
       "credentials": {
@@ -245,7 +288,7 @@
       "main": [
         [
           {
-            "node": "Leer CAT_BANCOS",
+            "node": "Descargar archivo (plano)",
             "type": "main",
             "index": 0
           }
@@ -301,6 +344,28 @@
         [
           {
             "node": "Normalizar a esquema BANCOS_MOV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar archivo (plano)": {
+      "main": [
+        [
+          {
+            "node": "Leer CSV sin encabezado (plano)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer CSV sin encabezado (plano)": {
+      "main": [
+        [
+          {
+            "node": "Leer CAT_BANCOS",
             "type": "main",
             "index": 0
           }
