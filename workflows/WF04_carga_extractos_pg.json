@@ -99,6 +99,7 @@
     },
     {
       "parameters": {
+        "operation": "xlsx",
         "options": {
           "headerRow": false
         }
