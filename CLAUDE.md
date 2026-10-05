@@ -239,6 +239,40 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        por cuenta, 3 niveles de confianza, nómina, gasto sin soporte) se
        validó de forma aislada con un script de prueba (4 escenarios,
        todos correctos) mientras se consigue data real para probar en vivo.
+     - **Ajuste a WF-04 (5 oct 2026):** el extracto de Bancolombia de la cuenta
+       762 llega como CSV **sin encabezado** y con cualquier nombre de archivo
+       (10 columnas fijas: cuenta_raw, oficina, _, fecha `AAAAMMDD`, _, valor,
+       código de operación, descripción, estado, _). El normalizador de
+       siempre asume encabezado real + nombre de archivo con el código de
+       cuenta, así que con este formato no producía ningún movimiento.
+       Se agregó un segundo modo al nodo `Normalizar a esquema BANCOS_MOV`:
+       detecta este layout leyendo el CSV crudo directo del binario
+       descargado (nunca vía `Leer CSV/XLSX` para este caso — ese nodo trata
+       la fila 1 como encabezado y, como varias columnas de este extracto
+       vienen vacías, los nombres de columna que generaría colisionan entre
+       sí y se pierde información), resuelve la cuenta buscando la columna 1
+       en el nuevo `cat_bancos.numero` (nuevo nodo `Leer CAT_BANCOS`, no
+       requiere renombrar el archivo), y parsea la fecha `AAAAMMDD`
+       explícitamente. Se cargó `cat_bancos.numero = '602-460337-62'` para
+       `BC-CTE-3762`. Probado con el archivo real (402 filas): coincide 1 a 1,
+       fechas y cuenta correctas. De paso se corrigió que "PAGO A NOMIN
+       <nombre truncado>" no se reconocía como `NOMINA` (el truncamiento del
+       extracto le come la última A a "NOMINA").
+       **Pendiente de Milena: reimportar WF-04.** Los formatos con
+       encabezado real (otros bancos) siguen funcionando igual que antes, sin
+       ningún cambio. Si BC-AHO-8985 o BC-PAN-USD (también Bancolombia)
+       llegan en este mismo formato plano, falta registrar su respectivo
+       `cat_bancos.numero` — en cuanto llegue el primer archivo de cada una
+       lo reviso y lo cargo igual que con la 762.
+       **Observación sin resolver, no accionada:** varias filas "PAGO DE PROV
+       `<nombre>`" llegan con valor **positivo** (ej. "PAGO DE PROV GRUPO
+       PUMA" +$X) — no parece ser un pago que MeUp hace, sino un cobro que
+       MeUp recibe a través de la red de pagos a proveedores de Bancolombia
+       (alguien le paga a MeUp usando ese servicio). El clasificador no tiene
+       regla para esto todavía (`clasificar()`) y cae en `INGRESO
+       POR_CLASIFICAR` genérico — no se tocó porque es una decisión de
+       negocio, no un bug; confirmar con Milena antes de automatizar esa
+       categoría.
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
