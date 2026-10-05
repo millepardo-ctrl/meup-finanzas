@@ -275,7 +275,45 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        colisión de columnas vacías que tendría reconstruir la fila
        "escondida" de `Leer CSV/XLSX`. Vuelto a probar contra el archivo
        real: 402/402 filas coinciden.
-       **Pendiente de Milena: reimportar WF-04 (de nuevo, con este fix).**
+       **Falló por segunda vez en producción (5 oct 2026), corregido:** el
+       nuevo nodo `Descargar archivo (plano)` dio 404 ("The resource you
+       are requesting could not be found"). Copié `fileId.value = {{
+       $json.id }}` del nodo `Descargar archivo` original sin ajustarlo —
+       en su nueva posición (después de `Leer CSV/XLSX`) `$json` ya no es
+       el archivo de Drive sino una fila de datos ya extraída, así que el
+       ID de descarga quedaba vacío/incorrecto. Corregido apuntando
+       explícitamente al nodo del trigger:
+       `{{ $('Nuevo extracto en Drive (carpeta EXTRACTOS_ENTRADA)').first().json.id }}`.
+       **Lección general (no estaba en la lista de patrones anti-bug):**
+       una vez que un flujo pasa por otros nodos, `$json` "a secas" ya no
+       es confiable para volver a referenciar el ítem original — hay que
+       nombrar el nodo explícitamente con `$('NodoOrigen')`, igual que ya
+       aplica el patrón anti-bug #9 para datos que pasan por un nodo
+       Postgres de escritura.
+       **Falló por tercera vez en producción (5 oct 2026), corregido:**
+       con el fileId ya corregido, el nodo `Leer CSV sin encabezado
+       (plano)` rechazó el archivo: "The file selected in 'Input Binary
+       Field' is not in csv format". La captura de pantalla que envió
+       Milena confirmó la causa real: el archivo que llega a Drive es un
+       **.xlsx binario genuino** (`File Extension: xlsx`, mime
+       `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`),
+       no un CSV de texto — el ejemplo que Milena había pegado en el chat
+       al principio era una vista/exportación en texto de ese contenido,
+       no representativa del tipo de archivo real guardado en Drive. Yo
+       había forzado `operation: "csv"` en ese nodo, lo cual hace que el
+       parser CSV de n8n rechace cualquier binario que no sea texto CSV
+       real. Corregido quitando esa operación explícita (queda solo
+       `headerRow: false`), para que el nodo use el mismo autodetect que
+       ya usa con éxito `Leer CSV/XLSX` sobre este mismo archivo real —
+       la única diferencia es que ya no consume la primera fila como
+       encabezado. Nodo renombrado de `Leer CSV sin encabezado (plano)` a
+       `Leer sin encabezado (plano)` (deja de ser CSV-específico) en los
+       tres lugares donde aparecía (nombre del nodo, `connections`, y la
+       referencia `$('...')` dentro del Code node). Vuelto a probar en
+       local: 402/402 filas, `NOMINA` (3) y `REINTEGRO_PROVEEDOR` (13)
+       correctos.
+       **Pendiente de Milena: reimportar WF-04 una vez más (con este
+       tercer fix) y volver a probar con el archivo real.**
        Los formatos con
        encabezado real (otros bancos) siguen funcionando igual que antes, sin
        ningún cambio. Si BC-AHO-8985 o BC-PAN-USD (también Bancolombia)
