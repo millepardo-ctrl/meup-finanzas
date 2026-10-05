@@ -390,6 +390,26 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        no se fusione con la versión anterior); si cambia al mensaje de
        "DIAGNOSTICO formato plano: ...", esa salida da la respuesta
        definitiva de una sola vez.
+       **Causa real confirmada (5 oct 2026):** el mensaje de diagnóstico
+       dio la respuesta exacta en el primer intento. Forma real de cada
+       fila que entrega `extractFromFile` con `operation: "xlsx"` +
+       `headerRow:false` en esta versión de n8n (2.31.5):
+       `{ row: ["602-460337-62", 787, " ", 20261005, " ", 13992700, 301,
+       " CONSIGNACION EN EFECTIVO", 0] }` — un único campo llamado
+       **`row`** cuyo valor es un array con las celdas en orden. No es
+       `"0".."9"` ni letras de columna (las dos hipótesis de los
+       intentos anteriores). Por eso el fallback `Object.values(row)[idx]`
+       tampoco servía: `Object.values({row: [...]})` da `[[...]]` — un
+       array de un solo elemento que ES el array completo — así que
+       cualquier `idx > 0` daba `undefined`. **Corregido (octavo intento):**
+       `col()` ahora revisa primero `row.row[idx]` (el caso real
+       confirmado), con los fallbacks anteriores detrás por compatibilidad
+       si el esquema cambia en otra versión de n8n. Probado localmente
+       con la fila exacta del error de diagnóstico, con el archivo
+       completo (402/402, `REINTEGRO_PROVEEDOR` 13, `NOMINA` 3) y con los
+       esquemas simulados de los intentos previos — todos siguen pasando.
+       **Pendiente de Milena: reimportar WF-04 una vez más (octavo fix,
+       con causa ya confirmada) y probar con el archivo real.**
        Los formatos con
        encabezado real (otros bancos) siguen funcionando igual que antes, sin
        ningún cambio. Si BC-AHO-8985 o BC-PAN-USD (también Bancolombia)
