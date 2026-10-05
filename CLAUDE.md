@@ -254,11 +254,29 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        en el nuevo `cat_bancos.numero` (nuevo nodo `Leer CAT_BANCOS`, no
        requiere renombrar el archivo), y parsea la fecha `AAAAMMDD`
        explícitamente. Se cargó `cat_bancos.numero = '602-460337-62'` para
-       `BC-CTE-3762`. Probado con el archivo real (402 filas): coincide 1 a 1,
-       fechas y cuenta correctas. De paso se corrigió que "PAGO A NOMIN
-       <nombre truncado>" no se reconocía como `NOMINA` (el truncamiento del
+       `BC-CTE-3762`. De paso se corrigió que "PAGO A NOMIN <nombre
+       truncado>" no se reconocía como `NOMINA` (el truncamiento del
        extracto le come la última A a "NOMINA").
-       **Pendiente de Milena: reimportar WF-04.** Los formatos con
+       **Falló en el primer intento en producción (5 oct 2026), corregido:**
+       la primera versión intentaba leer el binario descargado a mano
+       (base64) desde el Code node para detectar y parsear el formato sin
+       encabezado. En esta instancia n8n guarda los binarios en filesystem
+       (no en memoria), así que esa lectura directa venía vacía y el flujo
+       caía siempre a la rama vieja (busca el código de cuenta en el
+       nombre del archivo) — de ahí el error real
+       ("El nombre del archivo debe incluir...") que reportó Milena al
+       reimportar. Corregido reemplazando esa lectura manual por un
+       segundo nodo dedicado (`Descargar archivo (plano)` +
+       `Leer CSV sin encabezado (plano)`, extractFromFile con
+       `headerRow: false` sobre una segunda descarga del mismo archivo):
+       n8n ya sabe leer el binario sin importar dónde lo tenga guardado, y
+       con `headerRow: false` entrega cada fila con claves posicionales
+       "0".."9" sin inventar nombres de columna — evita también la
+       colisión de columnas vacías que tendría reconstruir la fila
+       "escondida" de `Leer CSV/XLSX`. Vuelto a probar contra el archivo
+       real: 402/402 filas coinciden.
+       **Pendiente de Milena: reimportar WF-04 (de nuevo, con este fix).**
+       Los formatos con
        encabezado real (otros bancos) siguen funcionando igual que antes, sin
        ningún cambio. Si BC-AHO-8985 o BC-PAN-USD (también Bancolombia)
        llegan en este mismo formato plano, falta registrar su respectivo
