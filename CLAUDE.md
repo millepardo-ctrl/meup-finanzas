@@ -421,6 +421,30 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        proveedor (envío fallido, cancelación de pedido, etc.), no un pago
        saliente. Agregada la regla en `clasificar()`:
        `PAGO DE PROV` + valor > 0 → `INGRESO / REINTEGRO_PROVEEDOR`.
+       **WF-04 idempotente (6 oct 2026):** el extracto se sube con un día de
+       retraso y puede traer días ya cargados. El Code node asigna a cada
+       fila una `ocurrencia` (1ª, 2ª… vez que aparece la misma combinación
+       cuenta|fecha|valor|referencia|descripcion dentro del archivo) y el
+       INSERT solo inserta si en `bancos_mov` (origen EXTRACTO) hay menos
+       filas con esa clave natural que `ocurrencia`. Así re-subir días
+       solapados no duplica, y dos movimientos legítimamente idénticos el
+       mismo día sí se conservan. Los `id_mov` heredados no cambian (otras
+       tablas tienen FK a ellos). El INSERT usa `returning id_mov` y
+       `Finalizar carga` informa "N nuevos (M ya estaban cargados)".
+       Los 2 pares de movimientos aparentemente duplicados: vienen del
+       mismo archivo, probablemente reales (Milena confirmando) — no borrar.
+       **WF-10 espera en silencio (6 oct 2026):** el comprobante llega por
+       Telegram al instante, el extracto un día después. Un comprobante sin
+       movimiento candidato permanece `PROCESADO` y NO alerta hasta que
+       (a) el último extracto cargado (max fecha de `origen='EXTRACTO'`,
+       todas las cuentas) cubra su fecha + `GRACIA_DIAS=1`, o (b) pasen
+       `ESPERA_MAX_H=72` h desde que se recibió (red de seguridad: ¿falta
+       subir el extracto?). Sin fecha legible alerta de una vez. Ya en
+       `SIN_MATCH` no repite alerta; `AMBIGUO` alerta de inmediato. Filas
+       `TRANSPORTE_APP` no cuentan para la cobertura.
+       **Pendiente de Milena: reimportar WF-04 y WF-10** (borrar el viejo
+       e importar limpio; verificar buscando `ocurrencia` en el Code node de
+       WF-04 y `GRACIA_DIAS` en el motor de WF-10).
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
