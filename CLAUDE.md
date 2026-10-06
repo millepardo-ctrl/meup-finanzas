@@ -442,9 +442,25 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        subir el extracto?). Sin fecha legible alerta de una vez. Ya en
        `SIN_MATCH` no repite alerta; `AMBIGUO` alerta de inmediato. Filas
        `TRANSPORTE_APP` no cuentan para la cobertura.
-       **Pendiente de Milena: reimportar WF-04 y WF-10** (borrar el viejo
-       e importar limpio; verificar buscando `ocurrencia` en el Code node de
-       WF-04 y `GRACIA_DIAS` en el motor de WF-10).
+       WF-04 y WF-10 ya reimportados por Milena (6 oct 2026). Confirmó que los
+       2 pares de movimientos "duplicados" del extracto SON reales (mismo día,
+       mismo valor, dos veces) — la carga idempotente los conserva.
+       **Cuentas de terceros cargadas (6 oct 2026)** desde
+       `Plantilla_Cuentas_Terceros_MeUp.xlsx` a `cat_terceros.cuenta_bancaria`
+       (solo dígitos, tal cual venían): 24 proveedores existentes (21 con
+       cuenta), 11 terceros nuevos con `tipo='PROVEEDOR_SERVICIOS'`
+       (logística, navieras, seguros, domicilios; 6 con cuenta, el resto paga
+       por PSE/sin cuenta) y 23 colaboradores con `tipo='COLABORADOR'`
+       (nit = cédula; 20 con cuenta). WF-10 ahora compara cuentas ignorando
+       ceros a la izquierda (`normCta`), porque Excel los pierde en cuentas
+       Bancolombia de 10 dígitos (p.ej. Seal Line, Transmovilizar, HJ).
+       **Pendiente de Milena:** (1) reimportar WF-10 por el cambio `normCta`;
+       (2) `31864726235` aparece para dos colaboradores (Yair Zuleta y Sami
+       Pardo) — se dejó SIN cuenta en ambos hasta que confirme cuál es;
+       (3) la cuenta Nequi `3022684188` de Ingrid Pardo es idéntica al
+       teléfono de Compañía Nacional de Minerales — no se cargó (solo su
+       BBVA), confirmar si es correcta; (4) Inducargo/Marmobi/Piedras y Arte
+       sin cuenta (pagos esporádicos por Nequi).
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
