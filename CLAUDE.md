@@ -454,13 +454,12 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        (nit = cédula; 20 con cuenta). WF-10 ahora compara cuentas ignorando
        ceros a la izquierda (`normCta`), porque Excel los pierde en cuentas
        Bancolombia de 10 dígitos (p.ej. Seal Line, Transmovilizar, HJ).
-       **Pendiente de Milena:** (1) reimportar WF-10 por el cambio `normCta`;
-       (2) `31864726235` aparece para dos colaboradores (Yair Zuleta y Sami
-       Pardo) — se dejó SIN cuenta en ambos hasta que confirme cuál es;
-       (3) la cuenta Nequi `3022684188` de Ingrid Pardo es idéntica al
-       teléfono de Compañía Nacional de Minerales — no se cargó (solo su
-       BBVA), confirmar si es correcta; (4) Inducargo/Marmobi/Piedras y Arte
-       sin cuenta (pagos esporádicos por Nequi).
+       Resueltos (6 oct 2026, Milena): Yair Zuleta = `31864726235`, Sami Pardo =
+       `82026729630`; Ingrid Pardo (colaboradora, no de Conalmin) cobra por Nequi
+       o BBVA, así que `cuenta_bancaria` admite VARIAS cuentas separadas por
+       `;` (WF-10 hace split y compara cada una). Su valor: `0019005232;3022684188`.
+       **Pendiente de Milena:** reimportar WF-10 (cambios `normCta` + multi-cuenta).
+       Sin cuenta por ser pagos esporádicos/PSE: Inducargo, Marmobi, Piedras y Arte.
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,
