@@ -31,6 +31,7 @@
         -120
       ],
       "alwaysOutputData": true,
+      "executeOnce": true,
       "credentials": {
         "postgres": {
           "id": "REEMPLAZAR_CRED_SUPABASE",
@@ -53,6 +54,7 @@
         -120
       ],
       "alwaysOutputData": true,
+      "executeOnce": true,
       "credentials": {
         "postgres": {
           "id": "REEMPLAZAR_CRED_SUPABASE",
@@ -75,6 +77,7 @@
         -120
       ],
       "alwaysOutputData": true,
+      "executeOnce": true,
       "credentials": {
         "postgres": {
           "id": "REEMPLAZAR_CRED_SUPABASE",
@@ -97,6 +100,7 @@
         -120
       ],
       "alwaysOutputData": true,
+      "executeOnce": true,
       "credentials": {
         "postgres": {
           "id": "REEMPLAZAR_CRED_SUPABASE",
@@ -119,6 +123,7 @@
         -120
       ],
       "alwaysOutputData": true,
+      "executeOnce": true,
       "credentials": {
         "postgres": {
           "id": "REEMPLAZAR_CRED_SUPABASE",
@@ -141,6 +146,7 @@
         -120
       ],
       "alwaysOutputData": true,
+      "executeOnce": true,
       "credentials": {
         "postgres": {
           "id": "REEMPLAZAR_CRED_SUPABASE",
@@ -323,11 +329,12 @@
           "options": {},
           "conditions": [
             {
-              "leftValue": "={{ $('Motor de conciliación de egresos').item.json.provLocal }}",
+              "leftValue": "={{ !!$('Motor de conciliación de egresos').item.json.provLocal }}",
               "rightValue": "",
               "operator": {
-                "type": "object",
-                "operation": "notEmpty"
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
               }
             }
           ]
