@@ -494,7 +494,7 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
          impuestos. Pendiente de confirmar con la contadora el tratamiento del IVA no
          descontable. Observado: `rentabilidad_pct` divide por `total_compra`, que incluye
          IVA + domicilio; el % debería dividirse por ingreso sin IVA — por decidir.
-       - Pendiente de Milena: reimportar WF-01 y WF-10; ejecutar migración 0012
+       - Pendiente de Milena: reimportar WF-01 y WF-10; ejecutar migración 0012 (YA aplicada, 23 oct)
          (estado por trigger en `proveedores_locales_pagos`); reenviar la OC 17576
          tras reimportar WF-01 para probar (la ya registrada no trae desglose ni NIT).
        - Duplicados de extracto: el 16 oct se cargó 3 veces el mismo archivo (n8n
@@ -538,10 +538,15 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
 - **Repo del dashboard Lovable:** `millepardo-ctrl/meup-finanz-hub` (rama `main`, sincroniza con Lovable;
   no reescribir historia). `proveedores.tsx` ya muestra costo estimado / total a pagar / pagado / saldo y el
   detalle de `pagos_oc` por OC (commit 68a1694). Usa bun, no commitear `package-lock.json`.
-- **Prueba OC 17576 (Grupo Puma, $60.205):** WF-01 OK (OCR con desglose y cuenta destino correctos).
-  Pendiente: WF-10 no había aplicado la OC (`oc_total_pagar` null, sin filas en `pagos_oc`). Comprobante
-  `WA-761369361` está `PROCESADO` y es el que WF-10 debe tomar; los reenvíos quedan `COPIA_SOPORTE` (esperado).
-  Siguiente paso: confirmar WF-10 activo, ejecutarlo a mano y revisar el nodo `Aplicar datos de OC a la compra`.
-- **Pendientes:** migración 0012 (no aplicada); verificar `ocurrencia` en WF-04 tras la restauración del servidor;
-  decidir denominador de `rentabilidad_pct` (ingreso sin IVA) y IVA no descontable con la contadora;
+- **Prueba OC 17576 (Grupo Puma, $60.205) — CERRADA (23 oct 2026):** WF-01 OK; WF-10 aplicó la OC
+  (`oc_total_pagar` = 60205) y concilió el comprobante `WA-761369361` con `MOV-132299610`. La OC quedó
+  `PAGADO`. El pago en `pagos_oc` se insertó a mano: la ejecución que falló en el IF ya había cerrado el
+  comprobante (`Cerrar comprobante` va antes del IF), por lo que WF-10 no lo volvió a leer.
+  Dos bugs de WF-10 corregidos (commit 0e045df): (1) los 6 nodos `Leer ...` sin `executeOnce` (patrón #10);
+  (2) `¿Paga una compra local?` comparaba `provLocal` como objeto y fallaba con valor vacío; ahora es
+  booleano (`{{ !!provLocal }}`). Ojo con el orden en WF-10: cualquier fallo después de `Cerrar comprobante`
+  deja el comprobante cerrado sin su pago en `pagos_oc`.
+- **Pendientes:** la migración 0012 YA está aplicada en Supabase; WF-04 reimportado el 23 oct (verificar
+  `ocurrencia` en el próximo extracto); la compra 17576 tiene una segunda fila (Seal Line, sin OC) en
+  `PENDIENTE`, por confirmar; decidir denominador de `rentabilidad_pct` (ingreso sin IVA) y IVA no descontable con la contadora;
   "resumen de proveedores" en Lovable: Milena reportó que no muestra la compra 17576 (pantalla por identificar).
