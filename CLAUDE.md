@@ -460,6 +460,49 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
        `;` (WF-10 hace split y compara cada una). Su valor: `0019005232;3022684188`.
        **Pendiente de Milena:** reimportar WF-10 (cambios `normCta` + multi-cuenta).
        Sin cuenta por ser pagos esporádicos/PSE: Inducargo, Marmobi, Piedras y Arte.
+       **Pagos por OC, desglose y abonos (23 oct 2026, diseño confirmado por
+       Milena):** una fila de `PROVEEDORES_LOCALES_PAGOS` = una OC (un pedido,
+       un proveedor) y cada OC es independiente. La OC trae subtotal + IVA −
+       retenciones = **total a pagar** (lo que realmente sale del banco).
+       - Migraciones 0011 (aplicada) y 0012 (pendiente, ver abajo). Nuevas columnas
+         `oc_subtotal/oc_iva/oc_rete_fuente/oc_rete_ica/oc_total_pagar/oc_formato/
+         oc_version/oc_id_doc/valor_pagado/saldo_pagar` en `proveedores_locales_pagos`
+         y tabla `pagos_oc` (una fila por pago real; abonos = varias filas).
+         `valor_costo` sigue siendo el costo ESTIMADO sin IVA de Symphony.
+       - Estado: `PENDIENTE` (sin pagos) / `ABONADO` (0 < pagado < total a pagar) /
+         `PAGADO` (≥ total − 1). Lo calcula la base (función `recalcular_pago_oc` +
+         trigger `trg_pagos_oc_recalc`), no el workflow.
+       - El pago real se toma de CUALQUIERA de las dos fuentes (comprobante de
+         Telegram o extracto): `pagos_oc.fuente` = COMPROBANTE | EXTRACTO | AMBOS.
+         Un comprobante que paga una OC se registra de una vez (WF-10, acción
+         `REGISTRAR_PAGO`) sin esperar el extracto; cuando aparece el movimiento se
+         confirma (`AMBOS`) sin duplicar (índices únicos por `id_doc_wa` e `id_mov_banco`).
+       - OCR de la OC (WF-01): subtotal, IVA, rete fuente, rete ICA, NIT del proveedor
+         ("Documento" del bloque "Para"), versión y formato (`SYMPHONY` con desglose;
+         `SIIGO` solo total, desglose en null). WF-10 aplica la OC a la compra con el
+         nodo `Aplicar datos de OC a la compra` (por `oc_num` + NIT; la última versión gana).
+       - Cómo WF-10 ata un comprobante a su OC (en orden): OC en el caption/OCR; OC
+         enviada junto (mismo remitente, ≤1 h, calza el proveedor; si hay varias, la
+         de valor exacto); mismo proveedor vía cuenta ≤7 días (única o de valor
+         exacto). Sin OC: entre las OC pendientes del proveedor, la que calza como
+         total, como saldo tras un abono o como 50 % de anticipo, y SOLO si hay una;
+         si hay duda NO adivina (queda sin vincular para revisión). Antes asignaba
+         "la primera deuda mayor al valor", lo que podía imputar mal un pago.
+       - **Rentabilidad:** el costo es el SUBTOTAL (sin IVA). IVA y retenciones NO son
+         costo; las retenciones son plata que MeUp retiene al proveedor y paga a la
+         DIAN/municipio. `v_rentabilidad_compra` no usa `valor_pagado` ni totales con
+         impuestos. Pendiente de confirmar con la contadora el tratamiento del IVA no
+         descontable. Observado: `rentabilidad_pct` divide por `total_compra`, que incluye
+         IVA + domicilio; el % debería dividirse por ingreso sin IVA — por decidir.
+       - Pendiente de Milena: reimportar WF-01 y WF-10; ejecutar migración 0012
+         (estado por trigger en `proveedores_locales_pagos`); reenviar la OC 17576
+         tras reimportar WF-01 para probar (la ya registrada no trae desglose ni NIT).
+       - Duplicados de extracto: el 16 oct se cargó 3 veces el mismo archivo (n8n
+         corría una versión anterior de WF-04 sin idempotencia, probablemente tras
+         restaurar el servidor); quedaron 845 filas en vez de 272. Limpiado el 23 oct
+         (se conservan las repeticiones reales del mismo archivo). Si se vuelve a
+         restaurar n8n, verificar que WF-04 tenga `ocurrencia` en el Code node.
+       - Las versiones Sheets de WF-04/09/10 se movieron a `workflows/obsoletos/`.
 4. Editor de datos para contabilidad en Lovable (Supabase conectado manualmente
    vía `@supabase/supabase-js` con URL + anon key — el conector nativo OAuth de
    Lovable está roto). Conectados a datos reales: Comprobantes, Compras,

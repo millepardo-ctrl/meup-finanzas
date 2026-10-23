@@ -39,7 +39,7 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "select id_doc as \"ID_DOC\", fecha_recibido as \"FECHA_RECIBIDO\", remitente_wa as \"REMITENTE_WA\",\n       ocr_valor as \"OCR_VALOR\", ocr_fecha_pago as \"OCR_FECHA_PAGO\", ocr_cliente as \"OCR_CLIENTE\",\n       ocr_referencia as \"OCR_REFERENCIA\", ocr_cuenta_destino as \"OCR_CUENTA_DESTINO\",\n       categoria_gasto as \"CATEGORIA_GASTO\", oc_num as \"OC_NUM\",\n       id_compra_informado as \"ID_COMPRA_INFORMADO\", url_drive as \"URL_DRIVE\", estado as \"ESTADO\"\nfrom comprobantes_wa\nwhere clasificacion = 'COMPROBANTE_EGRESO' and grupo_origen = 'CONTABILIDAD'\n  and estado in ('PROCESADO','SIN_MATCH');",
+        "query": "select id_doc as \"ID_DOC\", fecha_recibido as \"FECHA_RECIBIDO\", remitente_wa as \"REMITENTE_WA\",\n       ocr_valor as \"OCR_VALOR\", ocr_fecha_pago as \"OCR_FECHA_PAGO\", ocr_cliente as \"OCR_CLIENTE\",\n       ocr_referencia as \"OCR_REFERENCIA\", ocr_cuenta_destino as \"OCR_CUENTA_DESTINO\",\n       categoria_gasto as \"CATEGORIA_GASTO\", oc_num as \"OC_NUM\",\n       id_compra_informado as \"ID_COMPRA_INFORMADO\", url_drive as \"URL_DRIVE\", estado as \"ESTADO\",\n       exists (select 1 from pagos_oc po where po.id_doc_wa = comprobantes_wa.id_doc) as \"PAGO_REGISTRADO\",\n       (select po.id_control from pagos_oc po where po.id_doc_wa = comprobantes_wa.id_doc) as \"PAGO_ID_CONTROL\"\nfrom comprobantes_wa\nwhere clasificacion = 'COMPROBANTE_EGRESO' and grupo_origen = 'CONTABILIDAD'\n  and estado in ('PROCESADO','SIN_MATCH');",
         "options": {}
       }
     },
@@ -105,7 +105,7 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "select id_control as \"ID_CONTROL\", id_compra as \"ID_COMPRA\", nit_proveedor as \"NIT_PROVEEDOR\",\n       proveedor_nombre as \"PROVEEDOR_NOMBRE\", valor_costo as \"VALOR_COSTO\", estado_pago as \"ESTADO_PAGO\"\nfrom proveedores_locales_pagos\nwhere estado_pago is distinct from 'PAGADO';",
+        "query": "select id_control as \"ID_CONTROL\", id_compra as \"ID_COMPRA\", nit_proveedor as \"NIT_PROVEEDOR\",\n       proveedor_nombre as \"PROVEEDOR_NOMBRE\", valor_costo as \"VALOR_COSTO\", estado_pago as \"ESTADO_PAGO\",\n       oc_total_pagar as \"OC_TOTAL_PAGAR\", valor_pagado as \"VALOR_PAGADO\"\nfrom proveedores_locales_pagos;",
         "options": {}
       }
     },
@@ -163,7 +163,7 @@
         -120
       ],
       "parameters": {
-        "jsCode": "// Motor de conciliación de EGRESOS GENERALES (grupo Contabilidad) — versión Postgres.\n// Cruza comprobantes de egreso del grupo Contabilidad contra movimientos bancarios negativos,\n// identifica al tercero (proveedor o colaborador de nómina) por la CUENTA DE DESTINO del\n// comprobante —no por el número de OC, que un comprobante de transferencia normal no trae—,\n// vincula factura/OC con su comprobante de pago cuando llegan por separado, y marca\n// PROVEEDORES_LOCALES_PAGOS cuando aplica.\nconst docs = (function(){ try { return $('Leer comprobantes egresos').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst movs = (function(){ try { return $('Leer BANCOS_MOV').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst tpagos = (function(){ try { return $('Leer TRANSPORTES_PAGOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst provs = (function(){ try { return $('Leer PROVEEDORES_LOCALES_PAGOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst soportes = (function(){ try { return $('Leer soportes (factura/OC)').all().map(i => i.json).filter(x => x && x.ID_DOC); } catch(e) { return []; } })();\nconst terceros = (function(){ try { return $('Leer CAT_TERCEROS').all().map(i => i.json).filter(x => x && x.CUENTA_BANCARIA); } catch(e) { return []; } })();\nconst parseF = v => { if (!v) return null; if (v instanceof Date) return v;\n  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899,11,30) + Math.round(v)*86400000);\n  const s = String(v).trim();\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000); }\n  let m = s.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})/);\n  if (m) return new Date(m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0'));\n  const d2 = new Date(s.replace(' ', 'T')); return isNaN(d2) ? null : d2; };\nconst neto = p => { const v = parseFloat(p.PAGO_NETO); return isNaN(v) || !v ? parseFloat(p.VALOR) : v; };\nconst norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');\nconst soloDigitos = s => String(s || '').replace(/\\D/g, '');\nconst normCta = s => soloDigitos(s).replace(/^0+/, ''); // tolera ceros a la izquierda perdidos (Excel/OCR)\nconst mismoTercero = (a, b) => {\n  const ta = norm(a).split(' ').filter(w => w.length > 3);\n  const tb = norm(b).split(' ').filter(w => w.length > 3);\n  return ta.length > 0 && ta.some(w => tb.includes(w));\n};\n// El extracto se sube con ~1 día de atraso, pero los comprobantes llegan al instante. Un comprobante sin\n// movimiento bancario NO es un problema mientras el extracto cargado aún no llegue a su fecha: se deja en\n// estado PROCESADO y se reintenta en silencio cada 30 min. Solo se alerta si (a) el extracto ya cubre la\n// fecha del pago (con GRACIA_DIAS de margen por movimientos que el banco registra al día hábil siguiente)\n// y aun así no aparece, o (b) pasaron más de ESPERA_MAX_H horas (red de seguridad: extracto sin subir).\nconst GRACIA_DIAS = 1;\nconst ESPERA_MAX_H = 72;\nconst ultimoExtracto = movs.filter(m => m.ORIGEN === 'EXTRACTO').map(m => parseF(m.FECHA)).filter(Boolean)\n  .reduce((mx, f) => (!mx || f > mx ? f : mx), null);\nconst out = [];\nfor (const d of docs) {\n  const val = parseFloat(d.OCR_VALOR);\n  if (!val) { if (d.ESTADO !== 'SIN_MATCH') out.push({ json: { accion: 'ERROR', doc: d, motivo: 'OCR sin valor' } }); continue; }\n  // Los soportes de transporte también pueden llegar a Contabilidad por error: si calza con un pago\n  // de transporte pendiente, es territorio de WF-08, no de este motor.\n  const esTransporte = tpagos.some(p => Math.abs(neto(p) - val) <= 1 || Math.abs(parseFloat(p.VALOR) - val) <= 1);\n  if (esTransporte || d.CATEGORIA_GASTO === 'TRANSPORTE') continue;\n  // Match contra egresos bancarios: valor exacto (±1), fecha ±3 días, sin conciliación previa\n  const fechaDoc = parseF(d.OCR_FECHA_PAGO);\n  let candidatos = movs.filter(m => {\n    if (m.ID_CONCILIACION) return false;\n    const mv = parseFloat(m.VALOR);\n    if (isNaN(mv) || mv >= 0) return false;\n    if (Math.abs(Math.abs(mv) - val) > 1) return false;\n    const fm = parseF(m.FECHA);\n    if (fechaDoc && fm) { const diff = Math.abs((fm - fechaDoc) / 86400000); if (diff > 3) return false; }\n    return true;\n  });\n  // Desempate por OC/ID en referencia del extracto, luego por nombre del beneficiario\n  if (candidatos.length > 1 && d.OC_NUM) {\n    const byOC = candidatos.filter(m => (String(m.REFERENCIA||'') + ' ' + String(m.DESCRIPCION||'')).includes(String(d.OC_NUM).replace(/\\D/g,'')));\n    if (byOC.length >= 1) candidatos = byOC;\n  }\n  if (candidatos.length > 1 && d.OCR_CLIENTE) {\n    const toks = norm(d.OCR_CLIENTE).split(' ').filter(w => w.length > 3);\n    const byName = candidatos.filter(m => toks.some(w => norm(m.DESCRIPCION + ' ' + m.TERCERO).includes(w)));\n    if (byName.length >= 1) candidatos = byName;\n  }\n  if (candidatos.length === 0) {\n    if (d.ESTADO === 'SIN_MATCH') continue; // ya se alertó una vez: reintento silencioso\n    const fRef = fechaDoc || parseF(d.FECHA_RECIBIDO);\n    const recibido = parseF(d.FECHA_RECIBIDO);\n    const edadH = recibido ? (Date.now() - recibido.getTime()) / 3600000 : 0;\n    const cubierto = !!(fRef && ultimoExtracto && ultimoExtracto.getTime() >= fRef.getTime() + GRACIA_DIAS * 86400000);\n    if (fRef && !cubierto && edadH <= ESPERA_MAX_H) continue; // el extracto aún no llega a esa fecha: esperar en silencio\n    out.push({ json: { accion: 'SIN_MATCH', doc: d, motivo: cubierto\n      ? 'El extracto ya cubre esa fecha y no aparece el movimiento.'\n      : (fRef ? 'Hace más de ' + ESPERA_MAX_H + ' h y no aparece en el extracto (¿falta subirlo?).' : 'Sin fecha legible en el comprobante y sin movimiento en el extracto.') } });\n    continue;\n  }\n  if (candidatos.length > 1) {\n    out.push({ json: { accion: 'AMBIGUO', doc: d, motivo: candidatos.length + ' movimientos candidatos' } });\n    continue;\n  }\n  // ===== Identificar al tercero (proveedor o colaborador) por la CUENTA DE DESTINO del =====\n  // comprobante. Un comprobante de transferencia normal no trae el ID de la compra, pero sí\n  // la cuenta del beneficiario — eso es lo estable para saber QUIÉN recibió el pago.\n  const cuentaDoc = normCta(d.OCR_CUENTA_DESTINO);\n  const tercero = cuentaDoc ? (terceros.find(t => String(t.CUENTA_BANCARIA).split(/[;,]/).some(x => normCta(x) === cuentaDoc)) || null) : null;\n\n  if (tercero && tercero.TIPO === 'COLABORADOR') {\n    // Nómina: no hay OC ni cuenta por cobrar que marcar — solo categorizar bien el movimiento.\n    out.push({ json: { accion: 'MATCH', doc: d, mov: candidatos[0], provLocal: null, esAbonoProveedor: false, valor: val,\n      catFinal: 'NOMINA', tercFinal: tercero.NOMBRE, ocFinal: '', soporte: null } });\n    continue;\n  }\n\n  // ¿Este egreso paga una compra a proveedor local? Primero por OC/ID explícito si el\n  // comprobante lo trae (algunos sí, cuando quien lo envía escribe el ID en el caption);\n  // si no, por el NIT del proveedor resuelto vía la cuenta de destino, buscando entre SUS\n  // deudas pendientes la que coincide en valor (exacto o abono parcial).\n  const ocExplicito = String(d.OC_NUM || d.ID_COMPRA_INFORMADO || '').replace(/\\D/g,'');\n  let provLocal = null;\n  if (ocExplicito) {\n    provLocal = provs.find(p => String(p.ID_COMPRA) === ocExplicito && p.ESTADO_PAGO !== 'PAGADO' && Math.abs(parseFloat(p.VALOR_COSTO) - val) <= Math.max(1, parseFloat(p.VALOR_COSTO) * 0.02));\n    if (!provLocal) provLocal = provs.find(p => String(p.ID_COMPRA) === ocExplicito && p.ESTADO_PAGO !== 'PAGADO'); // abono parcial\n  }\n  if (!provLocal && tercero && tercero.TIPO === 'PROVEEDOR_LOCAL') {\n    const deudas = provs.filter(p => String(p.NIT_PROVEEDOR) === String(tercero.NIT) && p.ESTADO_PAGO !== 'PAGADO');\n    provLocal = deudas.find(p => Math.abs(parseFloat(p.VALOR_COSTO) - val) <= Math.max(1, parseFloat(p.VALOR_COSTO) * 0.02)) // valor exacto\n      || deudas.find(p => val < parseFloat(p.VALOR_COSTO) - 1) // abono parcial: la primera deuda mayor al valor pagado\n      || (deudas.length === 1 ? deudas[0] : null); // una sola deuda pendiente de ese proveedor: se asume que es esta, aunque el valor no calce exacto\n  }\n  // ¿Llegó junto a una FACTURA o ORDEN DE COMPRA enviada por separado? Niveles de confianza\n  // decrecientes: misma OC explícita > mismo proveedor (vía cuenta) > mismo remitente+valor > solo valor.\n  const tsDoc = (parseF(d.FECHA_RECIBIDO) || new Date()).getTime();\n  const difH = s2 => { const t2 = parseF(s2.FECHA_RECIBIDO); return t2 ? Math.abs(t2.getTime() - tsDoc) / 3600000 : 9999; };\n  const soporte =\n    soportes.find(s2 => ocExplicito && String(s2.OC_NUM || '').replace(/\\D/g, '') === ocExplicito && difH(s2) <= 168) || // misma OC explícita: hasta 7 días\n    (tercero ? soportes.find(s2 => mismoTercero(s2.OCR_CLIENTE, tercero.NOMBRE) && difH(s2) <= 168) : null) || // mismo proveedor vía cuenta: hasta 7 días\n    soportes.find(s2 => s2.REMITENTE_WA === d.REMITENTE_WA && s2.OCR_VALOR && String(s2.OCR_VALOR) === String(d.OCR_VALOR) && difH(s2) <= 24) || // mismo valor + remitente: 24 h\n    soportes.find(s2 => s2.OCR_VALOR && String(s2.OCR_VALOR) === String(d.OCR_VALOR) && difH(s2) <= 1) || null; // mismo valor, 1 h\n  const catFinal = (soporte && soporte.CLASIFICACION === 'ORDEN_COMPRA') ? 'COMPRA_PROVEEDOR' : (d.CATEGORIA_GASTO || (soporte && soporte.CATEGORIA_GASTO) || 'GASTO_GENERAL');\n  const tercFinal = (tercero && tercero.NOMBRE) || (soporte && soporte.OCR_CLIENTE) || d.OCR_CLIENTE || '';\n  const ocFinal = (soporte && soporte.OC_NUM) || d.OC_NUM || (provLocal && provLocal.ID_COMPRA) || '';\n  out.push({ json: { accion: 'MATCH', doc: d, mov: candidatos[0], provLocal: provLocal || null,\n    esAbonoProveedor: provLocal ? val < parseFloat(provLocal.VALOR_COSTO) - 1 : false, valor: val,\n    catFinal, tercFinal, ocFinal, soporte: soporte || null } });\n  if (soporte) out.push({ json: { accion: 'CERRAR_SOPORTE', soporteId: soporte.ID_DOC, pagoId: d.ID_DOC } });\n}\nreturn out;\n"
+        "jsCode": "// Motor de conciliación de EGRESOS GENERALES (grupo Contabilidad) — versión Postgres.\n// Cruza comprobantes de egreso del grupo Contabilidad contra movimientos bancarios negativos,\n// identifica al tercero (proveedor o colaborador de nómina) por la CUENTA DE DESTINO del\n// comprobante —no por el número de OC, que un comprobante de transferencia normal no trae—,\n// vincula factura/OC con su comprobante de pago cuando llegan por separado, y marca\n// PROVEEDORES_LOCALES_PAGOS cuando aplica.\nconst docs = (function(){ try { return $('Leer comprobantes egresos').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst movs = (function(){ try { return $('Leer BANCOS_MOV').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst tpagos = (function(){ try { return $('Leer TRANSPORTES_PAGOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst provs = (function(){ try { return $('Leer PROVEEDORES_LOCALES_PAGOS').all().map(i => i.json).filter(x => x && Object.keys(x).length); } catch(e) { return []; } })();\nconst soportes = (function(){ try { return $('Leer soportes (factura/OC)').all().map(i => i.json).filter(x => x && x.ID_DOC); } catch(e) { return []; } })();\nconst terceros = (function(){ try { return $('Leer CAT_TERCEROS').all().map(i => i.json).filter(x => x && x.CUENTA_BANCARIA); } catch(e) { return []; } })();\nconst parseF = v => { if (!v) return null; if (v instanceof Date) return v;\n  if (typeof v === 'number' && v > 20000 && v < 80000) return new Date(Date.UTC(1899,11,30) + Math.round(v)*86400000);\n  const s = String(v).trim();\n  if (/^\\d+$/.test(s)) { const n = parseInt(s); if (n > 20000 && n < 80000) return new Date(Date.UTC(1899,11,30) + n*86400000); }\n  let m = s.match(/^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})/);\n  if (m) return new Date(m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0'));\n  const d2 = new Date(s.replace(' ', 'T')); return isNaN(d2) ? null : d2; };\nconst neto = p => { const v = parseFloat(p.PAGO_NETO); return isNaN(v) || !v ? parseFloat(p.VALOR) : v; };\nconst norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');\nconst soloDigitos = s => String(s || '').replace(/\\D/g, '');\nconst normCta = s => soloDigitos(s).replace(/^0+/, ''); // tolera ceros a la izquierda perdidos (Excel/OCR)\nconst mismoTercero = (a, b) => {\n  const ta = norm(a).split(' ').filter(w => w.length > 3);\n  const tb = norm(b).split(' ').filter(w => w.length > 3);\n  return ta.length > 0 && ta.some(w => tb.includes(w));\n};\n// El extracto se sube con ~1 día de atraso, pero los comprobantes llegan al instante. Un comprobante sin\n// movimiento bancario NO es un problema mientras el extracto cargado aún no llegue a su fecha: se deja en\n// estado PROCESADO y se reintenta en silencio cada 30 min. Solo se alerta si (a) el extracto ya cubre la\n// fecha del pago (con GRACIA_DIAS de margen por movimientos que el banco registra al día hábil siguiente)\n// y aun así no aparece, o (b) pasaron más de ESPERA_MAX_H horas (red de seguridad: extracto sin subir).\nconst GRACIA_DIAS = 1;\nconst ESPERA_MAX_H = 72;\nconst ultimoExtracto = movs.filter(m => m.ORIGEN === 'EXTRACTO').map(m => parseF(m.FECHA)).filter(Boolean)\n  .reduce((mx, f) => (!mx || f > mx ? f : mx), null);\nconst out = [];\nconst provsAbiertas = provs.filter(p => p.ESTADO_PAGO !== 'PAGADO'); // las OC ya pagadas no reciben pagos nuevos\nconst num = v => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };\nconst ocNum = s => String(s.OC_NUM || '').replace(/\\D/g, '');\n// Total que realmente debe salir del banco por una OC: el total de la OC (subtotal + IVA - retenciones) si ya\n// se aplicó; si no, el costo estimado de Symphony (sin IVA). Saldo = total - lo ya pagado en abonos previos.\nconst totalOC = p => num(p.OC_TOTAL_PAGAR) || num(p.VALOR_COSTO);\nconst saldoOC = p => totalOC(p) - num(p.VALOR_PAGADO);\nconst tolOC = t => Math.max(1, t * 0.02);\n// Elige UN candidato: el que calza exacto en valor; si no, el único; si hay duda, ninguno (nunca adivinar).\nconst elegir = (lista, valorDoc) => {\n  if (!lista.length) return null;\n  const exacto = lista.filter(s => Math.abs(num(s.OCR_VALOR) - valorDoc) <= 1);\n  if (exacto.length === 1) return exacto[0];\n  return lista.length === 1 ? lista[0] : null;\n};\nfor (const d of docs) {\n  const val = parseFloat(d.OCR_VALOR);\n  if (!val) { if (d.ESTADO !== 'SIN_MATCH') out.push({ json: { accion: 'ERROR', doc: d, motivo: 'OCR sin valor' } }); continue; }\n  // Los soportes de transporte también pueden llegar a Contabilidad por error: si calza con un pago\n  // de transporte pendiente, es territorio de WF-08, no de este motor.\n  const esTransporte = tpagos.some(p => Math.abs(neto(p) - val) <= 1 || Math.abs(parseFloat(p.VALOR) - val) <= 1);\n  if (esTransporte || d.CATEGORIA_GASTO === 'TRANSPORTE') continue;\n\n  // ===== 1) ¿Quién recibió el pago? Por la CUENTA DE DESTINO del comprobante (un comprobante normal no trae la OC) =====\n  const cuentaDoc = normCta(d.OCR_CUENTA_DESTINO);\n  const tercero = cuentaDoc ? (terceros.find(t => String(t.CUENTA_BANCARIA).split(/[;,]/).some(x => normCta(x) === cuentaDoc)) || null) : null;\n  const esNomina = !!(tercero && tercero.TIPO === 'COLABORADOR');\n\n  // ===== 2) ¿Hay una OC/factura que respalde el pago? Se enviaron juntas o la OC se escribe en el caption. =====\n  const tsDoc = (parseF(d.FECHA_RECIBIDO) || new Date()).getTime();\n  const difH = s2 => { const t2 = parseF(s2.FECHA_RECIBIDO); return t2 ? Math.abs(t2.getTime() - tsDoc) / 3600000 : 9999; };\n  const ocComprobante = String(d.OC_NUM || d.ID_COMPRA_INFORMADO || '').replace(/\\D/g, '');\n  const delTercero = s2 => !tercero || mismoTercero(s2.OCR_CLIENTE, tercero.NOMBRE);\n  let soporte = null;\n  if (!esNomina) {\n    soporte =\n      (ocComprobante ? soportes.find(s2 => ocNum(s2) === ocComprobante && difH(s2) <= 168) : null) || // misma OC explícita: hasta 7 días\n      elegir(soportes.filter(s2 => s2.CLASIFICACION === 'ORDEN_COMPRA' && s2.REMITENTE_WA === d.REMITENTE_WA && difH(s2) <= 1 && delTercero(s2)), val) || // OC enviada junto con el comprobante (misma tanda, 1 h)\n      (tercero ? elegir(soportes.filter(s2 => mismoTercero(s2.OCR_CLIENTE, tercero.NOMBRE) && difH(s2) <= 168), val) : null) || // mismo proveedor vía cuenta: hasta 7 días\n      soportes.find(s2 => s2.REMITENTE_WA === d.REMITENTE_WA && s2.OCR_VALOR && String(s2.OCR_VALOR) === String(d.OCR_VALOR) && difH(s2) <= 24) || // mismo valor + remitente: 24 h\n      soportes.find(s2 => s2.OCR_VALOR && String(s2.OCR_VALOR) === String(d.OCR_VALOR) && difH(s2) <= 1) || null; // mismo valor, 1 h\n  }\n  const ocExplicito = ocComprobante || (soporte && soporte.CLASIFICACION === 'ORDEN_COMPRA' ? ocNum(soporte) : '');\n\n  // ===== 3) ¿Paga una OC de un proveedor local? Cada OC es independiente (un pedido, un proveedor). =====\n  let provLocal = null;\n  // Si el comprobante ya se registró como pago (porque llegó antes que el extracto), la OC ya está resuelta.\n  const yaRegistrada = !!d.PAGO_ID_CONTROL;\n  if (yaRegistrada) provLocal = provs.find(p => String(p.ID_CONTROL) === String(d.PAGO_ID_CONTROL)) || null;\n  if (!provLocal && !esNomina && ocExplicito) {\n    const deLaOC = provsAbiertas.filter(p => String(p.ID_COMPRA) === ocExplicito);\n    const delProv = tercero ? deLaOC.filter(p => String(p.NIT_PROVEEDOR) === String(tercero.NIT)) : [];\n    const porNombre = soporte ? deLaOC.filter(p => mismoTercero(p.PROVEEDOR_NOMBRE, soporte.OCR_CLIENTE)) : [];\n    const base = delProv.length ? delProv : (porNombre.length ? porNombre : deLaOC);\n    provLocal = base.length === 1 ? base[0] : null; // varios proveedores en la misma compra y sin forma de distinguirlos: revisión humana\n  }\n  if (!provLocal && !esNomina && tercero && tercero.TIPO === 'PROVEEDOR_LOCAL') {\n    // Sin OC explícita: entre las OC pendientes de ESE proveedor, la que calza con el valor pagado como\n    // pago total de la OC, como saldo pendiente tras un abono previo, o como el 50% de anticipo.\n    // Solo se asigna si hay UNA candidata (o una sola deuda pendiente); si hay duda, no se adivina.\n    const deudas = provsAbiertas.filter(p => String(p.NIT_PROVEEDOR) === String(tercero.NIT));\n    const calza = deudas.filter(p => { const t = totalOC(p);\n      return Math.abs(val - t) <= tolOC(t) || Math.abs(val - saldoOC(p)) <= tolOC(t) || Math.abs(val - t / 2) <= 1; });\n    provLocal = calza.length === 1 ? calza[0] : (deudas.length === 1 ? deudas[0] : null);\n  }\n  const catFinal = esNomina ? 'NOMINA' : ((soporte && soporte.CLASIFICACION === 'ORDEN_COMPRA') ? 'COMPRA_PROVEEDOR' : (d.CATEGORIA_GASTO || (soporte && soporte.CATEGORIA_GASTO) || 'GASTO_GENERAL'));\n  const tercFinal = (tercero && tercero.NOMBRE) || (soporte && soporte.OCR_CLIENTE) || d.OCR_CLIENTE || '';\n  const ocFinal = (soporte && soporte.OC_NUM) || d.OC_NUM || (provLocal && provLocal.ID_COMPRA) || '';\n  // Si el pago ya estaba registrado, VALOR_PAGADO ya lo incluye.\n  const pagadoAntes = provLocal ? num(provLocal.VALOR_PAGADO) - (yaRegistrada ? val : 0) : 0;\n  const info = provLocal ? { totalOC: totalOC(provLocal), pagadoAntes, pagadoDespues: pagadoAntes + val } : {};\n  const esAbono = provLocal ? (pagadoAntes + val) < totalOC(provLocal) - 1 : false;\n\n  // ===== 4) ¿Existe el movimiento en el banco? valor exacto (±1), fecha ±3 días, sin conciliación previa =====\n  const fechaDoc = parseF(d.OCR_FECHA_PAGO);\n  let candidatos = movs.filter(m => {\n    if (m.ID_CONCILIACION) return false;\n    const mv = parseFloat(m.VALOR);\n    if (isNaN(mv) || mv >= 0) return false;\n    if (Math.abs(Math.abs(mv) - val) > 1) return false;\n    const fm = parseF(m.FECHA);\n    if (fechaDoc && fm) { const diff = Math.abs((fm - fechaDoc) / 86400000); if (diff > 3) return false; }\n    return true;\n  });\n  // Desempate por OC/ID en referencia del extracto, luego por nombre del beneficiario\n  if (candidatos.length > 1 && d.OC_NUM) {\n    const byOC = candidatos.filter(m => (String(m.REFERENCIA||'') + ' ' + String(m.DESCRIPCION||'')).includes(String(d.OC_NUM).replace(/\\D/g,'')));\n    if (byOC.length >= 1) candidatos = byOC;\n  }\n  if (candidatos.length > 1 && d.OCR_CLIENTE) {\n    const toks = norm(d.OCR_CLIENTE).split(' ').filter(w => w.length > 3);\n    const byName = candidatos.filter(m => toks.some(w => norm(m.DESCRIPCION + ' ' + m.TERCERO).includes(w)));\n    if (byName.length >= 1) candidatos = byName;\n  }\n  if (candidatos.length === 0) {\n    // El comprobante de Telegram YA es un pago real y verificable: si paga una OC, se registra de una vez\n    // como pago (aunque el extracto aún no llegue). Cuando el movimiento aparezca, se confirma (fuente AMBOS).\n    if (provLocal && !d.PAGO_REGISTRADO) {\n      out.push({ json: { accion: 'REGISTRAR_PAGO', doc: d, provLocal, valor: val, ocFinal, info, esAbono } });\n    }\n    if (d.ESTADO === 'SIN_MATCH') continue; // ya se alertó una vez: reintento silencioso\n    const fRef = fechaDoc || parseF(d.FECHA_RECIBIDO);\n    const recibido = parseF(d.FECHA_RECIBIDO);\n    const edadH = recibido ? (Date.now() - recibido.getTime()) / 3600000 : 0;\n    const cubierto = !!(fRef && ultimoExtracto && ultimoExtracto.getTime() >= fRef.getTime() + GRACIA_DIAS * 86400000);\n    if (fRef && !cubierto && edadH <= ESPERA_MAX_H) continue; // el extracto aún no llega a esa fecha: esperar en silencio\n    out.push({ json: { accion: 'SIN_MATCH', doc: d, motivo: cubierto\n      ? 'El extracto ya cubre esa fecha y no aparece el movimiento.'\n      : (fRef ? 'Hace más de ' + ESPERA_MAX_H + ' h y no aparece en el extracto (¿falta subirlo?).' : 'Sin fecha legible en el comprobante y sin movimiento en el extracto.') } });\n    continue;\n  }\n  if (candidatos.length > 1) {\n    out.push({ json: { accion: 'AMBIGUO', doc: d, motivo: candidatos.length + ' movimientos candidatos' } });\n    continue;\n  }\n  out.push({ json: { accion: 'MATCH', doc: d, mov: candidatos[0], provLocal: provLocal || null,\n    esAbonoProveedor: esAbono, valor: val, catFinal, tercFinal, ocFinal, soporte: soporte || null, info } });\n  if (soporte) out.push({ json: { accion: 'CERRAR_SOPORTE', soporteId: soporte.ID_DOC, pagoId: d.ID_DOC } });\n}\nreturn out;\n"
       }
     },
     {
@@ -216,13 +216,46 @@
                 "conditions": [
                   {
                     "leftValue": "={{ $json.accion }}",
+                    "rightValue": "REGISTRAR_PAGO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "REGISTRAR_PAGO"
+            },
+            {
+              "conditions": {
+                "options": {},
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
                     "rightValue": "MATCH",
                     "operator": {
                       "type": "string",
                       "operation": "notEquals"
                     }
+                  },
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "REGISTRAR_PAGO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    }
+                  },
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "CERRAR_SOPORTE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    }
                   }
-                ]
+                ],
+                "combinator": "and"
               },
               "outputKey": "PROBLEMA"
             }
@@ -318,9 +351,9 @@
       },
       "parameters": {
         "operation": "executeQuery",
-        "query": "update proveedores_locales_pagos set estado_pago = $2::text, fecha_pago = nullif($3::text,'')::date,\n  cuenta_origen = $4::text, id_mov_banco = $5::text, notas = $6::text, updated_at = now()\nwhere id_control = $1::text;",
+        "query": "insert into pagos_oc (id_control, id_compra, nit_proveedor, valor, fecha_pago, fuente, id_doc_wa, id_mov_banco, notas)\nvalues ($1::text, $2::text, $3::text, $4::numeric, nullif($5::text,'')::date, 'AMBOS', $6::text, $7::text, $8::text)\non conflict (id_doc_wa) where id_doc_wa is not null\ndo update set id_mov_banco = excluded.id_mov_banco, fuente = 'AMBOS', notas = excluded.notas, updated_at = now();",
         "options": {
-          "queryReplacement": "={{ [ $('Motor de conciliación de egresos').item.json.provLocal.ID_CONTROL, ($('Motor de conciliación de egresos').item.json.esAbonoProveedor ? 'ABONADO' : 'PAGADO'), $('Motor de conciliación de egresos').item.json.doc.OCR_FECHA_PAGO, $('Motor de conciliación de egresos').item.json.mov.CUENTA, $('Motor de conciliación de egresos').item.json.mov.ID_MOV, ('Comprobante ' + $('Motor de conciliación de egresos').item.json.doc.ID_DOC + ($('Motor de conciliación de egresos').item.json.esAbonoProveedor ? ' (abono parcial de $' + $('Motor de conciliación de egresos').item.json.valor + ')' : '')) ] }}"
+          "queryReplacement": "={{ [ $('Motor de conciliación de egresos').item.json.provLocal.ID_CONTROL, $('Motor de conciliación de egresos').item.json.provLocal.ID_COMPRA, $('Motor de conciliación de egresos').item.json.provLocal.NIT_PROVEEDOR, $('Motor de conciliación de egresos').item.json.valor, ($('Motor de conciliación de egresos').item.json.doc.OCR_FECHA_PAGO || $('Motor de conciliación de egresos').item.json.mov.FECHA || ''), $('Motor de conciliación de egresos').item.json.doc.ID_DOC, $('Motor de conciliación de egresos').item.json.mov.ID_MOV, ('Comprobante ' + $('Motor de conciliación de egresos').item.json.doc.ID_DOC + ' confirmado en extracto' + ($('Motor de conciliación de egresos').item.json.esAbonoProveedor ? ' (abono)' : '')) ] }}"
         }
       }
     },
@@ -341,7 +374,7 @@
       },
       "parameters": {
         "chatId": "-5559621779",
-        "text": "=✅ *Egreso conciliado*\\n{{ $('Motor de conciliación de egresos').item.json.doc.ID_DOC }} · {{ $('Motor de conciliación de egresos').item.json.doc.CATEGORIA_GASTO || 'GASTO_GENERAL' }}\\n${{ $('Motor de conciliación de egresos').item.json.valor }} → {{ $('Motor de conciliación de egresos').item.json.mov.CUENTA }}\\n{{ $('Motor de conciliación de egresos').item.json.provLocal ? 'Compra local ' + $('Motor de conciliación de egresos').item.json.provLocal.ID_COMPRA + ' marcada ' + ($('Motor de conciliación de egresos').item.json.esAbonoProveedor ? 'ABONADA' : 'PAGADA') : '' }}{{ $('Motor de conciliación de egresos').item.json.soporte ? '\\n🔗 Vinculado con ' + $('Motor de conciliación de egresos').item.json.soporte.CLASIFICACION + ' ' + $('Motor de conciliación de egresos').item.json.soporte.ID_DOC : '' }}",
+        "text": "=✅ *Egreso conciliado*\\n{{ $('Motor de conciliación de egresos').item.json.doc.ID_DOC }} · {{ $('Motor de conciliación de egresos').item.json.doc.CATEGORIA_GASTO || 'GASTO_GENERAL' }}\\n${{ $('Motor de conciliación de egresos').item.json.valor }} → {{ $('Motor de conciliación de egresos').item.json.mov.CUENTA }}\\n{{ $('Motor de conciliación de egresos').item.json.provLocal ? '\\nOC ' + $('Motor de conciliación de egresos').item.json.provLocal.ID_COMPRA + ' ' + ($('Motor de conciliación de egresos').item.json.esAbonoProveedor ? 'ABONADA' : 'PAGADA') + ' — pagado $' + Number($('Motor de conciliación de egresos').item.json.info.pagadoDespues).toLocaleString('es-CO') + ' de $' + Number($('Motor de conciliación de egresos').item.json.info.totalOC).toLocaleString('es-CO') : '' }}{{ $('Motor de conciliación de egresos').item.json.soporte ? '\\n🔗 Vinculado con ' + $('Motor de conciliación de egresos').item.json.soporte.CLASIFICACION + ' ' + $('Motor de conciliación de egresos').item.json.soporte.ID_DOC : '' }}",
         "additionalFields": {
           "parse_mode": "Markdown",
           "parseMode": "None",
@@ -418,6 +451,52 @@
           "queryReplacement": "={{ [ $json.soporteId, $json.pagoId, 'Factura/OC vinculada al pago ' + $json.pagoId ] }}"
         }
       }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with oc as (\n  select distinct on (c.oc_num, c.ocr_nit_proveedor) c.id_doc, c.oc_num, c.ocr_nit_proveedor, c.ocr_valor,\n         c.ocr_subtotal, c.ocr_iva, c.ocr_rete_fuente, c.ocr_rete_ica, c.oc_formato, c.oc_version\n  from comprobantes_wa c\n  where c.clasificacion = 'ORDEN_COMPRA' and c.oc_num is not null and c.ocr_valor is not null\n  order by c.oc_num, c.ocr_nit_proveedor, c.fecha_recibido desc\n), u as (\n  update proveedores_locales_pagos p set\n    oc_id_doc = oc.id_doc, oc_formato = oc.oc_formato, oc_version = oc.oc_version,\n    oc_subtotal = oc.ocr_subtotal, oc_iva = oc.ocr_iva, oc_rete_fuente = oc.ocr_rete_fuente,\n    oc_rete_ica = oc.ocr_rete_ica, oc_total_pagar = oc.ocr_valor,\n    estado_pago = case when p.valor_pagado <= 0 then p.estado_pago\n                       when p.valor_pagado >= oc.ocr_valor - 1 then 'PAGADO' else 'ABONADO' end\n  from oc\n  where p.id_compra = oc.oc_num\n    and ( (oc.ocr_nit_proveedor is not null and oc.ocr_nit_proveedor = p.nit_proveedor)\n       or (oc.ocr_nit_proveedor is null and (select count(*) from proveedores_locales_pagos x where x.id_compra = oc.oc_num) = 1) )\n    and p.oc_id_doc is distinct from oc.id_doc\n  returning p.id_control\n)\nselect count(*) as ocs_aplicadas from u;",
+        "options": {}
+      },
+      "id": "3cc9b350-3108-4297-94c7-74d05be6ba69",
+      "name": "Aplicar datos de OC a la compra",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        110,
+        -60
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into pagos_oc (id_control, id_compra, nit_proveedor, valor, fecha_pago, fuente, id_doc_wa, notas)\nvalues ($1::text, $2::text, $3::text, $4::numeric, nullif($5::text,'')::date, 'COMPROBANTE', $6::text, $7::text)\non conflict (id_doc_wa) where id_doc_wa is not null do nothing;",
+        "options": {
+          "queryReplacement": "={{ [ $json.provLocal.ID_CONTROL, $json.provLocal.ID_COMPRA, $json.provLocal.NIT_PROVEEDOR, $json.valor, $json.doc.OCR_FECHA_PAGO || '', $json.doc.ID_DOC, 'Comprobante ' + $json.doc.ID_DOC + ($json.esAbono ? ' (abono)' : '') + ' — pendiente de confirmar en el extracto' ] }}"
+        }
+      },
+      "id": "f1fd15e8-a5b8-4ab2-b346-2ed36f0af3c3",
+      "name": "Registrar pago de OC (comprobante)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1780,
+        480
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REEMPLAZAR_CRED_SUPABASE",
+          "name": "Supabase meup-finanzas"
+        }
+      }
     }
   ],
   "connections": {
@@ -425,7 +504,7 @@
       "main": [
         [
           {
-            "node": "Leer comprobantes egresos",
+            "node": "Aplicar datos de OC a la compra",
             "type": "main",
             "index": 0
           }
@@ -527,6 +606,13 @@
         ],
         [
           {
+            "node": "Registrar pago de OC (comprobante)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Marcar problema",
             "type": "main",
             "index": 0
@@ -590,6 +676,17 @@
         [
           {
             "node": "Alertar problema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar datos de OC a la compra": {
+      "main": [
+        [
+          {
+            "node": "Leer comprobantes egresos",
             "type": "main",
             "index": 0
           }
