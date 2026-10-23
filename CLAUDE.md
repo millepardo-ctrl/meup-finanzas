@@ -532,3 +532,16 @@ Ver `docs/04_PLAN_IMPLEMENTACION_PASO_A_PASO.md` para el detalle histórico y
   `meup-finanzas` (ej. `inv_existencias_cache`), nunca escritura en sentido
   contrario. La vista/tabla de costeo hace el `JOIN` localmente contra esa
   caché, no contra el otro proyecto en tiempo real.
+
+## Estado al 23 oct 2026 (traspaso a Claude Code local)
+
+- **Repo del dashboard Lovable:** `millepardo-ctrl/meup-finanz-hub` (rama `main`, sincroniza con Lovable;
+  no reescribir historia). `proveedores.tsx` ya muestra costo estimado / total a pagar / pagado / saldo y el
+  detalle de `pagos_oc` por OC (commit 68a1694). Usa bun, no commitear `package-lock.json`.
+- **Prueba OC 17576 (Grupo Puma, $60.205):** WF-01 OK (OCR con desglose y cuenta destino correctos).
+  Pendiente: WF-10 no había aplicado la OC (`oc_total_pagar` null, sin filas en `pagos_oc`). Comprobante
+  `WA-761369361` está `PROCESADO` y es el que WF-10 debe tomar; los reenvíos quedan `COPIA_SOPORTE` (esperado).
+  Siguiente paso: confirmar WF-10 activo, ejecutarlo a mano y revisar el nodo `Aplicar datos de OC a la compra`.
+- **Pendientes:** migración 0012 (no aplicada); verificar `ocurrencia` en WF-04 tras la restauración del servidor;
+  decidir denominador de `rentabilidad_pct` (ingreso sin IVA) y IVA no descontable con la contadora;
+  "resumen de proveedores" en Lovable: Milena reportó que no muestra la compra 17576 (pantalla por identificar).
